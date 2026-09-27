@@ -274,19 +274,18 @@ namespace SODT_CLI
 		private IBaseMessage? Decrypt(byte[] buffer)
 		{
 			byte sourceId = buffer[1];
-			Span<byte> decrypted;
-			if (!sessionKeys.TryGetValue(sourceId, out AesGcm? aes) || aes == null)
+            if (!sessionKeys.TryGetValue(sourceId, out AesGcm? aes) || aes == null)
 			{
 				SmartConsole.WriteWarning("An encrypted message was received from a client without a key. Ignoring message.");
 				return null;
 			}
-			
-			// TODO WIP HERE
-			decrypted = EncryptionHandler.DecryptAesGcm(aes, buffer[] //aes.DecryptCfb(buffer[2..], aes.IV); //skip first two bytes because they contain target and source id
+
+            Span<byte> decryptedMessage = new byte[MessageHelper.MessageWithContentSize];
+            EncryptionHandler.DecryptAesGcm(aes, buffer, decryptedMessage);
 
 			//handle message
-			ushort length = BitConverter.ToUInt16(decrypted[..2]); //first two bytes contain the length of the message
-			Span<byte> content = decrypted[2..(length + 2)]; //get the content of the message
+			ushort length = BitConverter.ToUInt16(decryptedMessage[..MessageHelper.ContentLengthSize]); //first two bytes contain the length of the message
+			Span<byte> content = decryptedMessage[2..(length + 2)]; //get the content of the message // TODO WIP HERE
 			return JsonSerializer.Deserialize<BaseMessage>(content).Type switch
 			{
 				"discovery" => JsonSerializer.Deserialize<Discovery>(content),
@@ -346,7 +345,7 @@ namespace SODT_CLI
 					break;
 				case PacketCode.Error:
 				case PacketCode.Denied:
-					if (sessionKeys.TryGetValue(exchange.SourceId, out Aes? value))
+					if (sessionKeys.TryGetValue(exchange.SourceId, out AesGcm? value))
 					{
 						value?.Dispose();
 						sessionKeys[exchange.SourceId] = null;
@@ -364,7 +363,7 @@ namespace SODT_CLI
 		/// </summary>
 		/// <param name="exchange"></param>
 		/// <returns></returns>
-		private Aes GenerateSessionKey(KeyExchange exchange)
+		private AesGcm GenerateSessionKey(KeyExchange exchange)
 		{
 			//create shared secret
 			var otherPublicKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -372,14 +371,12 @@ namespace SODT_CLI
 			//do not use sharedSecret directly as key. Use a key derivation function to derive a key from the shared secret.
 			byte[] derivedKey = ecdhSessionKeyGenerator.DeriveKeyFromHash(otherPublicKey.PublicKey, HashAlgorithmName.SHA256);
 			//create aes
-			Aes aes = Aes.Create();
+			AesGcm aes;
 			if (privateSessionPasswordHash == null)
-				aes.Key = derivedKey;
+				aes = new AesGcm(derivedKey, MessageHelper.TagSize);
 			else //if a session passwort is set for client authentication, use it as key
 				using (HMACSHA256 hmac = new(privateSessionPasswordHash))
-					aes.Key = hmac.ComputeHash(derivedKey);
-			//generate IV by hashing the derived key again and using the first 16 bytes as IV
-			aes.IV = SHA256.HashData(aes.Key)[..16];
+					aes = new AesGcm(hmac.ComputeHash(derivedKey), MessageHelper.TagSize);
 			return aes;
 		}
 		/// <summary>
@@ -544,7 +541,7 @@ namespace SODT_CLI
 		/// <returns>Returns <see langword="true"/> if a key exchange has been done with the client, otherwise <see langword="false"/>.</returns>
 		public bool IsKeyExchanged(byte id)
 		{
-			return sessionKeys.TryGetValue(id, out Aes? aes) && aes != null;
+			return sessionKeys.TryGetValue(id, out AesGcm? aes) && aes != null;
 		}
 
 		/// <summary>
