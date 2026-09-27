@@ -6,6 +6,7 @@ using System.IO.Compression;
 using System.Runtime.CompilerServices;
 using System.Net.Security;
 using System.IO.Pipes;
+using System.Collections.Immutable;
 
 namespace SODT_CLI
 {
@@ -59,7 +60,7 @@ namespace SODT_CLI
 		/// <summary>
 		/// Contains the connected clients. If a keyexchange has been done, the value is the aes key for the client othterwise null.
 		/// </summary>
-		private readonly Dictionary<byte, Aes?> sessionKeys = new();
+		private readonly Dictionary<byte, AesGcm?> sessionKeys = new();
 		/// <summary>
 		/// Contains all clients that are connected to the server.
 		/// </summary>
@@ -137,13 +138,9 @@ namespace SODT_CLI
 			//create client to client session key generator
 			ecdhSessionKeyGenerator = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 			//create server session key
-			Aes serverSessionAes = Aes.Create();
-			serverSessionAes.GenerateKey();
-			serverSessionAes.GenerateIV();
-			sessionKeys.Add(serverId, serverSessionAes);
+			sessionKeys.Add(serverId, EncryptionHandler.GenerateNewAesGcm());
 			//load server public key
-			serverPublicKey = RSA.Create();
-			serverPublicKey.ImportFromPem(File.ReadAllText(publicServerKeyPath));
+			serverPublicKey = EncryptionHandler.ImportServerPublicKey(publicServerKeyPath);
 			//create save path dir
 			Directory.CreateDirectory(saveFilePath);
 		}
@@ -163,9 +160,15 @@ namespace SODT_CLI
 				toSend = new([targetId, OwnId, .. discovery.ToEncryptedBytes(serverPublicKey)]);
 
 			//else encrypt with client aes key
-			else if (sessionKeys.TryGetValue(targetId, out Aes? aes) && aes != null)
-				toSend = new([targetId, OwnId, .. aes.EncryptCfb(baseMessage.ToBytes(), aes.IV)]);
-			else
+			else if (sessionKeys.TryGetValue(targetId, out AesGcm? aes) && aes != null)
+			{
+				byte[] finalMessage = new byte[MessageHelper.FullMessageSize];
+				EncryptionHandler.EncryptAesGcm(aes, baseMessage, finalMessage);
+				finalMessage[0] = targetId;
+				finalMessage[1] = OwnId;
+				toSend = finalMessage;
+            }
+            else
 			{
 				//This case should never happen because the CLI always checks and requests, if neccessary, a key exchange before sending a message.
 				SmartConsole.WriteError($"No key for target client {targetId} to encrypt with. How do you even get here?");
@@ -191,7 +194,7 @@ namespace SODT_CLI
 			_ = Receive();
 			//send discovery message
 			//not null assertion is safe because the serverSessionAes is created in the constructor
-			Discovery discovery = Discovery.CreateRequest(sessionKeys[serverId]!.Key, sessionKeys[serverId]!.IV, serverPublicKey);
+			Discovery discovery = Discovery.CreateRequest(sessionKeys[serverId]!.Key, serverPublicKey);
 			await SendEncrypted(serverId, discovery);
 
 		}
@@ -272,13 +275,14 @@ namespace SODT_CLI
 		{
 			byte sourceId = buffer[1];
 			Span<byte> decrypted;
-			if (!sessionKeys.TryGetValue(sourceId, out Aes? aes) || aes == null)
+			if (!sessionKeys.TryGetValue(sourceId, out AesGcm? aes) || aes == null)
 			{
 				SmartConsole.WriteWarning("An encrypted message was received from a client without a key. Ignoring message.");
 				return null;
 			}
-
-			decrypted = aes.DecryptCfb(buffer[2..], aes.IV); //skip first two bytes because they contain target and source id
+			
+			// TODO WIP HERE
+			decrypted = EncryptionHandler.DecryptAesGcm(aes, buffer[] //aes.DecryptCfb(buffer[2..], aes.IV); //skip first two bytes because they contain target and source id
 
 			//handle message
 			ushort length = BitConverter.ToUInt16(decrypted[..2]); //first two bytes contain the length of the message
