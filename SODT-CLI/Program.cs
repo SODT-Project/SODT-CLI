@@ -22,7 +22,7 @@ namespace SODT_CLI
 				Console.WriteLine("You can set the default public key afterwards with the 'set-default-key' command.");
 				return;
 			}
-			SodtClient client = new SodtClient(publicServerKeyPath);
+			SodtClient client = new SodtClient();
 			CLI cli = new CLI(client);
 			//main loop
 			Console.WriteLine("SODTF-CLI initialized. Type 'help' for a list of commands.");
