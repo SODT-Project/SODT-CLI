@@ -119,7 +119,7 @@ namespace SODT_CLI
 		/// <param name="args"><see cref="byte"/> targetId</param>"/>
 		public void Execute(SodtClient client, params string[] args)
 		{
-			client.RequestExchangeKey(ValidateArgs(args)).Wait();
+			client.RequestKeyExchange(ValidateArgs(args)).Wait();
 		}
 		private byte ValidateArgs(params string[] args)
 		{
