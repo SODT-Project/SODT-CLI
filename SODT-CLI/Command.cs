@@ -433,7 +433,7 @@ namespace SODT_CLI
 			Console.WriteLine("set-session-password <password> - Set the session password, used for clients to authenticate themselves to other clients.");
 			Console.WriteLine("reset-session-password - Reset the session password.");
 			Console.WriteLine("exchange <targetId> - Exchange a session key with a client.");
-			Console.WriteLine("send <targetId> <filePath> [compress] - Send a file to a client. Set compress to TRUE to compress the file.");
+			Console.WriteLine("send <targetId> <filePath> - Send a file to a client.");
 			Console.WriteLine();
 			Console.WriteLine("Commands (Other):");
 			Console.WriteLine("set-default-server <host> <port> - Set the default server.");
