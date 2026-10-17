@@ -361,15 +361,14 @@ namespace SODT_CLI
 			// additionally check of same session password hashes
 			if ((PacketCode)exchange.Code == PacketCode.Request || (PacketCode)exchange.Code == PacketCode.Ok)
 			{
-				if (!DoesSessionHashMatch(exchange))
+				if (!EncryptionHandler.DoesSessionHashMatch(publicSessionPasswordHash, exchange.SessionHash))
 				{
 					SmartConsole.WriteError("Key exchange failed because the session password hashes do not match.");
 					return;
 					// TODO send a response message to the other client?
 				}
 			}
-
-
+			
 			switch ((PacketCode)exchange.Code)
 			{
 				case PacketCode.Request: // PaketCode.Request is received when the target client requests a key exchange
@@ -401,27 +400,7 @@ namespace SODT_CLI
 					throw new NotImplementedException($"Key exchange code {exchange.Code} not implemented yet.");
 			}
 		}
-
-		/// <summary>
-		/// Compares the session password hash of the client with own public session password hash.
-		/// </summary>
-		/// <param name="exchange"> The key exchange message that contains the session password hash of the other client.</param>
-		/// <returns> <see langword="true"/> if the session password hash matches, otherwise <see langword="false"/>.</returns>
-		private bool DoesSessionHashMatch(KeyExchange exchange)
-		{
-			//exaclty one of the session password hashs is null
-			if ((exchange.SessionHash == null) ^ (publicSessionPasswordHash == null))
-			{
-				SmartConsole.WriteError("One client tries to authenticate with a session password, the other does not. Key exchange failed.");
-				return false;
-			}
-			if (exchange.SessionHash != null && publicSessionPasswordHash != null && !exchange.SessionHash.SequenceEqual(publicSessionPasswordHash))
-			{
-				// SmartConsole.WriteError($"Key exchange between {exchange.SourceId} and {exchange.TargetId} failed because the session password does not match."); TODO fix
-				return false;
-			}
-			return true;
-		}
+		
 		public async Task<bool> RequestFileTransfer(byte targetId, string filePath)
 		{
 			//check if filePath is valid
@@ -519,9 +498,7 @@ namespace SODT_CLI
 				if (receivedFileProgress[uuid] <= 0)
 				{
 					SmartConsole.WriteSuccess($"File {Path.GetFileName(stream.Name)} received.");
-					string filePath = stream.Name;
-					Thread.Sleep(10);
-					stream.Flush();
+					await stream.FlushAsync();
 					stream.Close();
 					incomingFileStreams.Remove(uuid);
 					receivedFileProgress.Remove(uuid);
@@ -548,7 +525,7 @@ namespace SODT_CLI
 		/// <returns>Returns <see langword="true"/> if a key exchange has been done with the client, otherwise <see langword="false"/>.</returns>
 		public bool IsKeyExchanged(byte id)
 		{
-			return aesSessionKeys.TryGetValue(id, out AesGcm? aes) && aes != null;
+			return aesSessionKeys.TryGetValue(id, out _);
 		}
 
 		/// <summary>
