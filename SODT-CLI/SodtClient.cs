@@ -2,7 +2,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text;
-using System.IO.Compression;
 using System.Runtime.CompilerServices;
 using System.Net.Security;
 using System.IO.Pipes;
@@ -425,7 +424,7 @@ namespace SODT_CLI
 			}
 			return true;
 		}
-		public async Task<bool> RequestFileTransfer(byte targetId, string filePath, bool compress)
+		public async Task<bool> RequestFileTransfer(byte targetId, string filePath)
 		{
 			//check if filePath is valid
 			if (!File.Exists(filePath))
@@ -435,13 +434,7 @@ namespace SODT_CLI
 
 			try
 			{
-				if (compress)
-				{
-					SmartConsole.WriteInfo($"Compressing file {Path.GetFileName(filePath)}.");
-					await Compression.StartCompression(filePath);
-					filePath += ".sodtfzip"; // TODO remove
-				}
-				Transfer transfer = Transfer.CreateRequest(Path.GetFileName(filePath), new FileInfo(filePath).Length, OwnId, compress);
+				Transfer transfer = Transfer.CreateRequest(Path.GetFileName(filePath), new FileInfo(filePath).Length, OwnId);
 				pendingFiles.Add(transfer.Uuid, filePath);
 				await SendEncrypted(targetId, transfer);
 				return true;
@@ -504,10 +497,6 @@ namespace SODT_CLI
 			pendingFiles.Remove(tranferUuid);
 			sendFileProgress.Remove(tranferUuid);
 			stream.Close();
-			if (Path.GetExtension(filePath) == ".sodtfzip") // TODO remove
-			{
-				File.Delete(filePath);
-			}
 		}
 
 		/// <summary>
@@ -532,18 +521,13 @@ namespace SODT_CLI
 				//close file stream if transfer is complete
 				if (receivedFileProgress[uuid] <= 0)
 				{
-					SmartConsole.WriteSuccess($"File {Path.GetFileName(stream.Name.Replace(".sodtfzip", ""))} received.");
+					SmartConsole.WriteSuccess($"File {Path.GetFileName(stream.Name)} received.");
 					string filePath = stream.Name;
 					Thread.Sleep(10);
 					stream.Flush();
 					stream.Close();
 					incomingFileStreams.Remove(uuid);
 					receivedFileProgress.Remove(uuid);
-					if (Path.GetExtension(filePath) == ".sodtfzip")
-					{
-						await Compression.DecompressFile(filePath, filePath.Replace(".sodtfzip", ""));
-						File.Delete(filePath);
-					}
 				}
 			}
 			else
