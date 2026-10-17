@@ -325,7 +325,7 @@ namespace SODT_CLI
 			// verify discovery message
 			byte[] clientEcdhPublicKey = ecdhSessionKeyGenerators[serverId].ExportSubjectPublicKeyInfo();
 			byte[] serverEcdhPublicKey = discovery.PublicKey;
-			byte[] toVerify = [..clientEcdhPublicKey, ..serverEcdhPublicKey, (byte)discovery.Id];
+			byte[] toVerify = [..clientEcdhPublicKey, ..serverEcdhPublicKey, discovery.Id];
 			if (!ecdsaServerCertificate.VerifyData(toVerify, discovery.Signature, HashAlgorithmName.SHA256))
 			{
 				SmartConsole.WriteError("Discovery message from server is signed with an invalid signature. Possible man-in-the-middle attack. Disconnecting.");
