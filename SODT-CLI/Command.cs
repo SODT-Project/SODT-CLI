@@ -166,7 +166,7 @@ namespace SODT_CLI
 		/// <param name="args"><see cref="byte"/> tagetId , <see cref="string"/> filePath</param>
 		public void Execute(SodtClient client, params string[] args)
 		{
-			(byte targetId, string filePath, bool compress) = ValidateArgs(args);
+			(byte targetId, string filePath) = ValidateArgs(args);
 			//check if exchange key is needed
 			if (!client.IsKeyExchanged(targetId))
 			{
@@ -175,12 +175,12 @@ namespace SODT_CLI
 				while (!client.IsKeyExchanged(targetId)) Thread.Sleep(20); //wait for the key exchange to be completed
 			}
 			//send the file
-			if (client.RequestFileTransfer(targetId, filePath, compress).Result)
+			if (client.RequestFileTransfer(targetId, filePath).Result)
 				SmartConsole.WriteInfo($"Transfer request successful. Client {targetId} accepted {Path.GetFileName(filePath)}");
 			else
 				SmartConsole.WriteError($"Transfer request failed. Client {targetId} rejected {Path.GetFileName(filePath)}");
 		}
-		private (byte, string, bool) ValidateArgs(params string[] args)
+		private (byte, string) ValidateArgs(params string[] args)
 		{
 			if (args.Length != 2 && args.Length != 3) throw new ArgumentException("Invalid number of arguments!");
 			if (!byte.TryParse(args[0], out byte id)) throw new ArgumentException("Invalid id!");
@@ -190,9 +190,8 @@ namespace SODT_CLI
 				&& (filePath.EndsWith('\"') || filePath.EndsWith('\''))
 				? filePath[1..^1] : filePath;
 			if (!File.Exists(filePath)) throw new ArgumentException("File not found!");
-			bool compress = args.Length == 3 && args[2].Equals("true", StringComparison.CurrentCultureIgnoreCase);
 
-			return (id, filePath, compress);
+			return (id, filePath);
 		}
 
 	}
