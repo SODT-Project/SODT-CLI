@@ -6,6 +6,9 @@ using System.IO.Compression;
 using System.Runtime.CompilerServices;
 using System.Net.Security;
 using System.IO.Pipes;
+using System.Collections.Immutable;
+using System.Security.Cryptography.X509Certificates;
+using SODT_Common;
 
 namespace SODT_CLI
 {
@@ -15,6 +18,7 @@ namespace SODT_CLI
 		/// Size of the receive buffer. This is the default size of the buffer that is used to receive messages.
 		/// </summary>
 		private const int recieveBufferSize = 4096;
+		
 		/// <summary>
 		/// Maximum size of the file buffer. This is the maximum size of file data that can be sent at once.
 		/// </summary>
@@ -23,19 +27,22 @@ namespace SODT_CLI
 		//the current value was calculated by trial and error.
 		private const int fileBufferSize = 3003;
 		private const byte serverId = 1;
-		private const string saveFilePath = "downloads/";
+		private static readonly string SaveFilePath = Path.Combine(
+			Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+			"Downloads"); // TODO test
 		public byte OwnId { get; private set; }
 		private readonly TcpClient client = new();
-		private readonly RSA serverPublicKey;
-		private readonly ECDiffieHellman ecdhSessionKeyGenerator;
+		
 		/// <summary>
 		/// Contains the session password hash for optional client to client authentication.
 		/// </summary>
 		private byte[]? privateSessionPasswordHash = null;
+		
 		/// <summary>
 		/// Contains a double hashed version of the session password used to verify that all clients have the same password during the key exchange.
 		/// </summary>
 		private byte[]? publicSessionPasswordHash = null;
+		
 		/// <summary>
 		/// Sets the session password for the client. This is used for optional client to client authentication.
 		/// Set to <see langword="null"/> to disable the SessionPassword.
@@ -56,14 +63,30 @@ namespace SODT_CLI
 				}
 			}
 		}
+		
 		/// <summary>
 		/// Contains the connected clients. If a keyexchange has been done, the value is the aes key for the client othterwise null.
 		/// </summary>
-		private readonly Dictionary<byte, Aes?> sessionKeys = new();
+		private readonly Dictionary<byte, AesGcm> aesSessionKeys = new();
+		
+		/// <summary>
+		/// Contains the ecdh session key generators for each client or the server.
+		/// This is used to generate the aes key for each connection individually.
+		/// </summary>
+		private readonly Dictionary<byte, ECDiffieHellman> ecdhSessionKeyGenerators = new();
+		
+		/// <summary>
+		/// The certificate for this client to validate its authenticity during the session
+		/// </summary>
+		private readonly ECDsa ecdsaSessionCertificate = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+
+		private readonly ECDsa ecdsaServerCertificate;
+		
 		/// <summary>
 		/// Contains all clients that are connected to the server.
 		/// </summary>
-		public byte[] ConnectedClients { get => sessionKeys.Keys.ToArray(); }
+		public byte[] ConnectedClients { get => aesSessionKeys.Keys.ToArray(); }
+		
 		/// <summary>
 		/// Contains the file streams for the incoming file transfers.
 		/// </summary>
@@ -128,26 +151,13 @@ namespace SODT_CLI
 				return copy;
 			}
 		}
-		/// <summary>
-		/// Credeates a new SodtfClient instance with the public server key.
-		/// </summary>
-		/// <param name="publicServerKeyPath"> Path to the public server key file. The key must be in base64 format.</param>
-		public SodtClient(string publicServerKeyPath)
-		{
-			//create client to client session key generator
-			ecdhSessionKeyGenerator = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-			//create server session key
-			Aes serverSessionAes = Aes.Create();
-			serverSessionAes.GenerateKey();
-			serverSessionAes.GenerateIV();
-			sessionKeys.Add(serverId, serverSessionAes);
-			//load server public key
-			serverPublicKey = RSA.Create();
-			serverPublicKey.ImportFromPem(File.ReadAllText(publicServerKeyPath));
-			//create save path dir
-			Directory.CreateDirectory(saveFilePath);
-		}
 
+		public SodtClient(string ecdsaServerCertificatePath)
+		{
+			ecdsaServerCertificate = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+			ecdsaServerCertificate.ImportFromPem(File.ReadAllText(ecdsaServerCertificatePath));
+		}
+		
 		/// <summary>
 		/// Sends a message to the server or a client and encrypts it with the server public key or the client aes key.
 		/// </summary>
@@ -158,14 +168,16 @@ namespace SODT_CLI
 		private async Task SendEncrypted(byte targetId, IBaseMessage baseMessage)
 		{
 			ReadOnlyMemory<byte> toSend;
-			//if the message is a discovery request to the server encrypt with server public key
-			if (targetId == serverId && baseMessage is Discovery discovery && discovery.Code == (int)PacketCode.Request)
-				toSend = new([targetId, OwnId, .. discovery.ToEncryptedBytes(serverPublicKey)]);
-
-			//else encrypt with client aes key
-			else if (sessionKeys.TryGetValue(targetId, out Aes? aes) && aes != null)
-				toSend = new([targetId, OwnId, .. aes.EncryptCfb(baseMessage.ToBytes(), aes.IV)]);
-			else
+			
+			if (aesSessionKeys.TryGetValue(targetId, out AesGcm? aes))
+			{
+				byte[] finalMessage = new byte[MessageHelper.FullMessageSize];
+				EncryptionHandler.EncryptAesGcm(aes, baseMessage, finalMessage);
+				finalMessage[0] = targetId;
+				finalMessage[1] = OwnId;
+				toSend = finalMessage;
+            }
+            else
 			{
 				//This case should never happen because the CLI always checks and requests, if neccessary, a key exchange before sending a message.
 				SmartConsole.WriteError($"No key for target client {targetId} to encrypt with. How do you even get here?");
@@ -174,6 +186,16 @@ namespace SODT_CLI
 
 
 			await client.GetStream().WriteAsync(toSend);
+		}
+		
+		private async Task SendUnencrypted(byte targetId, IBaseMessage baseMessage)
+		{
+			// TODO make more elegant
+			byte[] finalMessage = new byte[MessageHelper.FullMessageSize];
+			finalMessage[0] = targetId;
+			finalMessage[1] = OwnId;
+			Array.Copy(baseMessage.ToBytes(), 0, finalMessage, MessageHelper.HeaderSizeWithoutContentLengthSize, MessageHelper.MessageWithContentSize);
+			await client.GetStream().WriteAsync(finalMessage);
 		}
 
 		/// <summary>
@@ -188,11 +210,12 @@ namespace SODT_CLI
 			//connect to server
 			await client.ConnectAsync(host, port);
 			//start receive
-			_ = Receive();
-			//send discovery message
-			//not null assertion is safe because the serverSessionAes is created in the constructor
-			Discovery discovery = Discovery.CreateRequest(sessionKeys[serverId]!.Key, sessionKeys[serverId]!.IV, serverPublicKey);
-			await SendEncrypted(serverId, discovery);
+			_ = Receive(); // fire and forget. Receive will handle itself
+			//send discovery key exchange
+			ecdhSessionKeyGenerators.Add(serverId, ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
+			byte[] ecdhPublicKey = ecdhSessionKeyGenerators[serverId].ExportSubjectPublicKeyInfo();
+			Discovery discovery = Discovery.CreateRequest(ecdhPublicKey);
+			await SendUnencrypted(serverId, discovery);
 
 		}
 
@@ -209,9 +232,10 @@ namespace SODT_CLI
 			}
 			catch { }
 			OwnId = 0;
-			sessionKeys.Clear();
+			aesSessionKeys.Clear();
+			ecdhSessionKeyGenerators.Clear();
+			ecdsaSessionCertificate.Dispose();
 			client.Dispose();
-			ecdhSessionKeyGenerator.Dispose();
 		}
 
 		/// <summary>
@@ -224,7 +248,8 @@ namespace SODT_CLI
 			//init buffer and get stream
 			byte[] buffer = new byte[recieveBufferSize];
 			NetworkStream stream = client.GetStream();
-			//receive loop
+			
+			// receive loop
 			while (client.Connected)
 			{
 				//wait for message
@@ -239,13 +264,13 @@ namespace SODT_CLI
 				switch (Decrypt(buffer))
 				{
 					case Discovery discovery:
-						OwnId = discovery.Id == 0 ? throw new Exception() : discovery.Id;
+						await HandleDiscovery(discovery);
 						break;
 					case ClientList clients:
 						UpdateClientList(clients);
 						break;
 					case KeyExchange exchange:
-						await HandleExchangeKey(exchange);
+						await HandleKeyExchange(exchange, buffer[1]);
 						break;
 					case Transfer transfer:
 						await HandleTransfer(transfer);
@@ -268,59 +293,82 @@ namespace SODT_CLI
 		/// <param name="buffer"> The buffer that contains the encrypted message.</param>
 		/// <returns> The decrypted <see cref="IBaseMessage"/> message or <see langword="null"/> if the message type is unknown.</returns>
 		/// <exception cref="InvalidOperationException"></exception>
-		private IBaseMessage? Decrypt(byte[] buffer)
+		private IBaseMessage? Decrypt(Span<byte> buffer)
 		{
 			byte sourceId = buffer[1];
-			Span<byte> decrypted;
-			if (!sessionKeys.TryGetValue(sourceId, out Aes? aes) || aes == null)
+			
+			// decrypt message
+			Span<byte> decryptedMessage = new byte[MessageHelper.MessageWithContentSize];
+            if (!aesSessionKeys.TryGetValue(sourceId, out AesGcm? aes) || aes == null)
 			{
-				SmartConsole.WriteWarning("An encrypted message was received from a client without a key. Ignoring message.");
-				return null;
+				SmartConsole.WriteWarning("An unencrypted message was received. Is this a key exchange?");
+				decryptedMessage = buffer[MessageHelper.HeaderSizeWithoutContentLengthSize..];
 			}
-
-			decrypted = aes.DecryptCfb(buffer[2..], aes.IV); //skip first two bytes because they contain target and source id
-
-			//handle message
-			ushort length = BitConverter.ToUInt16(decrypted[..2]); //first two bytes contain the length of the message
-			Span<byte> content = decrypted[2..(length + 2)]; //get the content of the message
-			return JsonSerializer.Deserialize<BaseMessage>(content).Type switch
-			{
-				"discovery" => JsonSerializer.Deserialize<Discovery>(content),
-				"clients" => JsonSerializer.Deserialize<ClientList>(content),
-				"exchange" => JsonSerializer.Deserialize<KeyExchange>(content),
-				"transfer" => JsonSerializer.Deserialize<Transfer>(content),
-				"file" => JsonSerializer.Deserialize<TransferData>(content),
-				_ => null,
-			};
+            else
+            {
+	            EncryptionHandler.DecryptAesGcm(aes, buffer, decryptedMessage);
+            }
+            // parse message
+            return MessageHandler.ParseDecryptedMessage(decryptedMessage);
 		}
 
+		private async Task HandleDiscovery(Discovery discovery)
+		{
+			// basic checks if the discovery message is valid
+			if (discovery.PublicKey == null || discovery.Signature == null || discovery.Id == 0)
+			{
+				SmartConsole.WriteError("Discovery message from server is invalid. Disconnecting.");
+				await DisconnectFromServer();
+				return;
+			}
+			
+			// verify discovery message
+			byte[] clientEcdhPublicKey = ecdhSessionKeyGenerators[serverId].ExportSubjectPublicKeyInfo();
+			byte[] serverEcdhPublicKey = discovery.PublicKey;
+			byte[] toVerify = [..clientEcdhPublicKey, ..serverEcdhPublicKey, discovery.Id];
+			if (!ecdsaServerCertificate.VerifyData(toVerify, discovery.Signature, HashAlgorithmName.SHA256))
+			{
+				SmartConsole.WriteError("Discovery message from server is signed with an invalid signature. Possible man-in-the-middle attack. Disconnecting.");
+				await DisconnectFromServer();
+				return;
+			}
+			// generate aes session key for server
+			aesSessionKeys[serverId] = EncryptionHandler.GenerateSessionKey(ecdhSessionKeyGenerators[serverId], discovery.PublicKey);
+			
+			// Set own id.
+			OwnId = discovery.Id;
+			SmartConsole.WriteInfo($"Connected to server with id {OwnId}.");
+		}
+		
 		/// <summary>
 		/// Sends a request to exchange a key with the target client.
 		/// </summary>
 		/// <param name="targetId"></param>
-		public async Task RequestExchangeKey(byte targetId)
+		public async Task RequestKeyExchange(byte targetId)
 		{
 			SmartConsole.WriteInfo($"Requesting key exchange with {targetId}.");
 			//send key exchange request
-			KeyExchange exchange = KeyExchange.Create(PacketCode.Request, ecdhSessionKeyGenerator.ExportSubjectPublicKeyInfo(), publicSessionPasswordHash, OwnId, targetId);
-			await SendEncrypted(serverId, exchange);
+			ecdhSessionKeyGenerators[targetId] = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+			KeyExchange exchange = KeyExchange.Create(PacketCode.Request, ecdhSessionKeyGenerators[targetId].ExportSubjectPublicKeyInfo(), ecdsaSessionCertificate.ExportSubjectPublicKeyInfo(), null);
+			await SendUnencrypted(targetId, exchange);
 		}
-		private async Task HandleExchangeKey(KeyExchange exchange)
+		private async Task HandleKeyExchange(KeyExchange exchange, byte remoteId)
 		{
 			//handle possible errors
 			if (exchange.Key == null)
 			{
-				SmartConsole.WriteError($"Key exchange between {exchange.SourceId} and {exchange.TargetId} failed because the key is null.");
-				await SendEncrypted(serverId, KeyExchange.Create(PacketCode.Denied, Array.Empty<byte>(), Array.Empty<byte>(), OwnId, exchange.SourceId));
+				SmartConsole.WriteError($"Key exchange between {OwnId} and {remoteId} failed because the key is null.");
 				return;
+				// TODO write a response message to the other client?
 			}
 			// additionally check of same session password hashes
 			if ((PacketCode)exchange.Code == PacketCode.Request || (PacketCode)exchange.Code == PacketCode.Ok)
 			{
 				if (!DoesSessionHashMatch(exchange))
 				{
-					await SendEncrypted(serverId, KeyExchange.Create(PacketCode.Denied, Array.Empty<byte>(), null, OwnId, exchange.SourceId));
+					SmartConsole.WriteError("Key exchange failed because the session password hashes do not match.");
 					return;
+					// TODO send a response message to the other client?
 				}
 			}
 
@@ -328,56 +376,35 @@ namespace SODT_CLI
 			switch ((PacketCode)exchange.Code)
 			{
 				case PacketCode.Request: // PaketCode.Request is received when the target client requests a key exchange
-					sessionKeys[exchange.SourceId] = GenerateSessionKey(exchange);
-					SmartConsole.WriteInfo($"Client {exchange.SourceId} requested key exchange."); //TODO: Ask user for permission
-
+					SmartConsole.WriteInfo($"Client {remoteId} requested key exchange."); //TODO: Ask user for permission
+					ecdhSessionKeyGenerators.TryAdd(remoteId, ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256)); // TryAdd is needed for special case where other client is yourself. In this case the key generator is already created and .TryAdd() prevents an overwrite.
+					aesSessionKeys[remoteId] = EncryptionHandler.GenerateSessionKey(ecdhSessionKeyGenerators[remoteId], exchange.Key);
 					//send ok
-					SmartConsole.WriteInfo($"Key exchange with {exchange.SourceId} accepted.");
-					KeyExchange exchangeAccepted = KeyExchange.Create(PacketCode.Ok, ecdhSessionKeyGenerator.ExportSubjectPublicKeyInfo(), publicSessionPasswordHash, OwnId, exchange.SourceId);
-					await SendEncrypted(serverId, exchangeAccepted);
+					SmartConsole.WriteInfo($"Key exchange with {remoteId} accepted.");
+					KeyExchange exchangeAccepted = KeyExchange.Create(PacketCode.Ok, ecdhSessionKeyGenerators[remoteId].ExportSubjectPublicKeyInfo(), ecdsaSessionCertificate.ExportSubjectPublicKeyInfo(), publicSessionPasswordHash);
+					await SendUnencrypted(remoteId, exchangeAccepted);
 					break;
 				case PacketCode.Ok: // PaketCode.Ok is received when the target client accepts the key exchange
-					sessionKeys[exchange.SourceId] = GenerateSessionKey(exchange);
-					SmartConsole.WriteInfo($"Client {exchange.SourceId} accepted key exchange.");
+					if (!ecdhSessionKeyGenerators.TryGetValue(remoteId, out ECDiffieHellman? ecdhGenerator))
+					{
+						SmartConsole.WriteError($"Key exchange with client {remoteId} failed the key exchange was never requested.");
+						return;
+					}
+					aesSessionKeys[remoteId] = EncryptionHandler.GenerateSessionKey(ecdhGenerator, exchange.Key);
+					SmartConsole.WriteInfo($"Client {remoteId} accepted key exchange.");
 					break;
 				case PacketCode.Error:
 				case PacketCode.Denied:
-					if (sessionKeys.TryGetValue(exchange.SourceId, out Aes? value))
-					{
-						value?.Dispose();
-						sessionKeys[exchange.SourceId] = null;
-					}
-					SmartConsole.WriteError($"Key exchange with client {exchange.SourceId} failed. ErrorCode: {exchange.Code}");
+					aesSessionKeys.Remove(remoteId);
+					ecdhSessionKeyGenerators.Remove(remoteId);
+					SmartConsole.WriteError($"Key exchange with client {remoteId} failed. ErrorCode: {exchange.Code}");
 					break;
 				default:
 					SmartConsole.WriteError($"Key exchange code {exchange.Code} not implemented yet.");
 					throw new NotImplementedException($"Key exchange code {exchange.Code} not implemented yet.");
 			}
 		}
-		/// <summary>
-		/// Generates an aes session key from the key exchange message with the other client. <br></br>
-		/// Key generation uses ecdh and the session password hash if set.
-		/// </summary>
-		/// <param name="exchange"></param>
-		/// <returns></returns>
-		private Aes GenerateSessionKey(KeyExchange exchange)
-		{
-			//create shared secret
-			var otherPublicKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-			otherPublicKey.ImportSubjectPublicKeyInfo(exchange.Key, out _);
-			//do not use sharedSecret directly as key. Use a key derivation function to derive a key from the shared secret.
-			byte[] derivedKey = ecdhSessionKeyGenerator.DeriveKeyFromHash(otherPublicKey.PublicKey, HashAlgorithmName.SHA256);
-			//create aes
-			Aes aes = Aes.Create();
-			if (privateSessionPasswordHash == null)
-				aes.Key = derivedKey;
-			else //if a session passwort is set for client authentication, use it as key
-				using (HMACSHA256 hmac = new(privateSessionPasswordHash))
-					aes.Key = hmac.ComputeHash(derivedKey);
-			//generate IV by hashing the derived key again and using the first 16 bytes as IV
-			aes.IV = SHA256.HashData(aes.Key)[..16];
-			return aes;
-		}
+
 		/// <summary>
 		/// Compares the session password hash of the client with own public session password hash.
 		/// </summary>
@@ -393,7 +420,7 @@ namespace SODT_CLI
 			}
 			if (exchange.SessionHash != null && publicSessionPasswordHash != null && !exchange.SessionHash.SequenceEqual(publicSessionPasswordHash))
 			{
-				SmartConsole.WriteError($"Key exchange between {exchange.SourceId} and {exchange.TargetId} failed because the session password does not match.");
+				// SmartConsole.WriteError($"Key exchange between {exchange.SourceId} and {exchange.TargetId} failed because the session password does not match."); TODO fix
 				return false;
 			}
 			return true;
@@ -412,7 +439,7 @@ namespace SODT_CLI
 				{
 					SmartConsole.WriteInfo($"Compressing file {Path.GetFileName(filePath)}.");
 					await Compression.StartCompression(filePath);
-					filePath += ".sodtfzip";
+					filePath += ".sodtfzip"; // TODO remove
 				}
 				Transfer transfer = Transfer.CreateRequest(Path.GetFileName(filePath), new FileInfo(filePath).Length, OwnId, compress);
 				pendingFiles.Add(transfer.Uuid, filePath);
@@ -431,7 +458,7 @@ namespace SODT_CLI
 				case PacketCode.Request:
 					//prepare receiving file
 					SmartConsole.WriteInfo($"Client {transfer.SourceId} requests to send file {transfer.FileName}.");
-					incomingFileStreams.Add(transfer.Uuid, new FileStream(Path.Combine(saveFilePath,transfer.FileName), FileMode.Create, FileAccess.Write, FileShare.None));
+					incomingFileStreams.Add(transfer.Uuid, new FileStream(Path.Combine(SaveFilePath, transfer.FileName), FileMode.Create, FileAccess.Write, FileShare.None));
 					receivedFileProgress.Add(transfer.Uuid, transfer.FileSize); //TODO: implement permission check
 
 					//send ok
@@ -477,7 +504,7 @@ namespace SODT_CLI
 			pendingFiles.Remove(tranferUuid);
 			sendFileProgress.Remove(tranferUuid);
 			stream.Close();
-			if (Path.GetExtension(filePath) == ".sodtfzip")
+			if (Path.GetExtension(filePath) == ".sodtfzip") // TODO remove
 			{
 				File.Delete(filePath);
 			}
@@ -540,7 +567,7 @@ namespace SODT_CLI
 		/// <returns>Returns <see langword="true"/> if a key exchange has been done with the client, otherwise <see langword="false"/>.</returns>
 		public bool IsKeyExchanged(byte id)
 		{
-			return sessionKeys.TryGetValue(id, out Aes? aes) && aes != null;
+			return aesSessionKeys.TryGetValue(id, out AesGcm? aes) && aes != null;
 		}
 
 		/// <summary>
@@ -549,19 +576,19 @@ namespace SODT_CLI
 		/// <br>- Adds new clients and updates existing ones.</br>
 		/// </summary>
 		/// <param name="clients">The updated list of active clients and a status code.</param>
-		private void UpdateClientList(ClientList clients)
+		private void UpdateClientList(ClientList clients) // TODO rework (also remove null assignments in the dictionary)
 		{
 			//if the client list is null or a check isalive request, ignore
 			if (clients.Code != (int)PacketCode.Ok || clients.Clients == null)
 				return;
 
 			//for each oldClient client that is not in the new list, remove
-			foreach (var oldClient in sessionKeys.Keys)
+			foreach (var oldClient in aesSessionKeys.Keys)
 			{
 				if (!clients.Clients.Contains(oldClient) && oldClient != serverId) //serverId is always connected
 				{
-					sessionKeys[oldClient]?.Dispose();
-					_ = sessionKeys.Remove(oldClient);
+					aesSessionKeys[oldClient]?.Dispose();
+					_ = aesSessionKeys.Remove(oldClient);
 				}
 			}
 			//for each new client that is not in the oldClient list, add
@@ -570,11 +597,10 @@ namespace SODT_CLI
 			{
 				if (newClient == serverId)
 					continue; //serverId is always connected
-				if (!sessionKeys.ContainsKey(newClient))
-					sessionKeys.Add(newClient, null);
+				if (!aesSessionKeys.ContainsKey(newClient))
+					aesSessionKeys.Add(newClient, null);
 			}
 		}
 	}
 }
-
 
