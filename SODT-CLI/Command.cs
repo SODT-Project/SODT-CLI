@@ -289,7 +289,7 @@ namespace SODT_CLI
 		protected override int ShowProgressContent(SodtClient client)
 		{
 			int linesWritten = 0;
-			foreach (var progress in client.SendFileStreamProgess)
+			foreach (var progress in client.SendFileStreamProgress)
 			{
 				// The plain progress bar has a fixed length of 20 characters.
 				// The progress value is divided by 5 to determine the number of '#' characters,
