@@ -74,5 +74,9 @@ namespace SODT_CLI
 		{
 			WriteInfo("");
 		}
+		public static void WriteDebug(string text)
+		{
+			RequestWriteLine("DEBUG: " + text, ConsoleColor.Gray);
+		}
 	}
 }
