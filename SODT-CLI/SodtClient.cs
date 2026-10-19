@@ -435,6 +435,7 @@ namespace SODT_CLI
 				return false;
 			}
 		}
+		
 		private async Task HandleTransfer(Transfer transfer)
 		{
 			switch ((PacketCode)transfer.Code)
@@ -523,6 +524,7 @@ namespace SODT_CLI
 				SmartConsole.WriteWarning($"Received file data that was not requested. Ignoring Data. (Uuid: {transferData.Uuid}");
 			}
 		}
+		
 		/// <summary>
 		/// Sends a request to the server to get a list of all connected clients.
 		/// </summary>
@@ -543,16 +545,18 @@ namespace SODT_CLI
 		}
 
 		/// <summary>
-		/// Synchronizes the session keys with the provided list of active clients. 
-		/// <br>- Removes clients not in the new list (except the server ID).</br>
-		/// <br>- Adds new clients and updates existing ones.</br>
+		/// Updates the list of connected clients based on the received <see cref="ClientList"/> message. <br></br>
+		/// Clients are updated in a 2-step process: <br></br>
+		/// 1. Remove clients that are no longer in the new list. <br></br>
+		/// 2. Add new clients that are not already in the old list. <br></br>
+		/// This 2-step process ensures that the corresponding aes session keys are disposed of when a client is removed from the list.
 		/// </summary>
-		/// <param name="clients">The updated list of active clients and a status code.</param>
-		private void UpdateClientList(ClientList clients) // TODO rework (also remove null assignments in the dictionary)
+		/// <param name="clients">The received client list message.</param>
+		private void UpdateClientList(ClientList clients)
 		{
-			//if the client list is null or a check isalive request, ignore
+			//ignore invalid list messages.
 			if (clients.Code != (int)PacketCode.Ok || clients.Clients == null)
-				return; // TODO fix by outsource to Ping/Pong Message
+				return;
 
 			//for each oldClient client that is not in the new list, remove
 			foreach (byte oldClient in connectedClients)
@@ -563,11 +567,11 @@ namespace SODT_CLI
 				_ = aesSessionKeys.Remove(oldClient);
 			}
 			
-			//for each new client that is not in the oldClient list, add
-			//also for each new client that is in the oldClient list do nothing
+			// for each new client that is not in the oldClient list, add
+			// also for each new client that is in the oldClient list do nothing
 			foreach (byte newClient in clients.Clients)
 			{
-				connectedClients.Add(newClient);
+				connectedClients.Add(newClient); // only adds new client if not already in the list
 			}
 		}
 	}

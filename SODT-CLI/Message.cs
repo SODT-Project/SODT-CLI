@@ -381,7 +381,7 @@ namespace SODT_Common
 		public string Type { get; set; }
 
 		[JsonPropertyName("clients")]
-		public byte[]? Clients { get; set; }
+		public byte[]? Clients { get; init; }
 
 
 
