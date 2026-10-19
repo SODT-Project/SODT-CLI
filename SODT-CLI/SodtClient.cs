@@ -448,7 +448,7 @@ namespace SODT_CLI
 
 					//send ok
 					SmartConsole.WriteInfo($"File transfer with {transfer.SourceId} accepted.");
-					Transfer transferAccepted = Transfer.CreateRespone(transfer, OwnId);
+					Transfer transferAccepted = Transfer.CreateResponse(transfer, OwnId);
 					await SendEncrypted(transfer.SourceId, transferAccepted);
 					//special case: if the file is empty, no actual transferdata is send, therefore simulate receive manually:
 					if (transfer.FileSize == 0)
