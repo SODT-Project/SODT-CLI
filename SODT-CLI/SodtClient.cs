@@ -257,11 +257,20 @@ namespace SODT_CLI
 				int bytesRead = await stream.ReadAsync(buffer);
 				if (bytesRead == 0) break; // on disconnect
 
+				IBaseMessage? message = Decrypt(buffer);
+				if (message is Discovery or PingPong or ClientList && buffer[1] != ServerId)
+				{
+					SmartConsole.WriteWarning($"Received message from client {buffer[1]} that should only be sent by the server. Ignoring message.");
+					continue;
+				}
 				//handle message
 				switch (Decrypt(buffer))
 				{
 					case Discovery discovery:
 						await HandleDiscovery(discovery);
+						break;
+					case PingPong:
+						await HandlePingPong();
 						break;
 					case ClientList clients:
 						UpdateClientList(clients);
@@ -282,6 +291,11 @@ namespace SODT_CLI
 			}
 			SmartConsole.WriteError("Connection lost. The server could have been shut down.");
 			throw new InvalidOperationException("Connection lost.");
+		}
+		private async Task HandlePingPong()
+		{
+			SmartConsole.WriteDebug("Received ping from server. Sending pong.");
+			await SendEncrypted(ServerId, PingPong.CreateResponse());
 		}
 
 		/// <summary>
@@ -334,7 +348,7 @@ namespace SODT_CLI
 			
 			// Set own id.
 			OwnId = discovery.Id;
-			SmartConsole.WriteInfo($"Connected to server with id {OwnId}.");
+			SmartConsole.WriteDebug($"Connected to server with id {OwnId}.");
 		}
 		
 		/// <summary>
