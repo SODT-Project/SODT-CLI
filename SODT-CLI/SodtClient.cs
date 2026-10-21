@@ -89,7 +89,7 @@ namespace SODT_CLI
 		/// </summary>
 		private readonly Dictionary<int, FileStream> incomingFileStreams = new();
 
-		private readonly Dictionary<int, byte[]> incomingFileStreamHashes = new();
+		private readonly Dictionary<int, Transfer> incomingFileStreamMetaData = new();
 
 		/// <summary>
 		/// Contains the pending files that will be sent after the client has accepted the transfer.
@@ -281,10 +281,10 @@ namespace SODT_CLI
 						await HandleKeyExchange(exchange, buffer[1]);
 						break;
 					case Transfer transfer:
-						await HandleTransfer(transfer);
+						await HandleTransfer(transfer, buffer[1]);
 						break;
 					case TransferData data:
-						await ReceiveFile(data);
+						await ReceiveFile(data, buffer[1]);
 						break;
 					default:
 						SmartConsole.WriteError("Received Message contains one or more errors. Ignoring message.");
@@ -430,7 +430,7 @@ namespace SODT_CLI
 			try
 			{
 				using FileStream fileStream = File.OpenRead(filePath); // used to compute hash
-				Transfer transfer = Transfer.CreateRequest(Path.GetFileName(filePath), new FileInfo(filePath).Length, OwnId, SHA256.HashData(fileStream));
+				Transfer transfer = Transfer.CreateRequest(Path.GetFileName(filePath), new FileInfo(filePath).Length, SHA256.HashData(fileStream));
 				pendingFiles.Add(transfer.Uuid, filePath);
 				await SendEncrypted(targetId, transfer);
 				return true;
@@ -441,31 +441,34 @@ namespace SODT_CLI
 			}
 		}
 		
-		private async Task HandleTransfer(Transfer transfer)
+		private async Task HandleTransfer(Transfer transfer, byte sourceId)
 		{
 			switch ((PacketCode)transfer.Code)
 			{
 				case PacketCode.Request:
 					//prepare receiving file
-					SmartConsole.WriteInfo($"Client {transfer.SourceId} requests to send file {transfer.FileName}.");
+					SmartConsole.WriteInfo($"Client {sourceId} requests to send file {transfer.FileName}.");
 					incomingFileStreams.Add(transfer.Uuid, new FileStream(Path.Combine(SaveFilePath, transfer.FileName), FileMode.Create, FileAccess.ReadWrite, FileShare.None));
-					incomingFileStreamHashes.Add(transfer.Uuid, transfer.FileHash);
+					incomingFileStreamMetaData.Add(transfer.Uuid, transfer);
 					receivedFileProgress.Add(transfer.Uuid, transfer.FileSize); //TODO: implement permission check
 
 					//send ok
-					SmartConsole.WriteInfo($"File transfer with {transfer.SourceId} accepted.");
-					Transfer transferAccepted = Transfer.CreateResponse(transfer, OwnId);
-					await SendEncrypted(transfer.SourceId, transferAccepted);
+					SmartConsole.WriteInfo($"File transfer with {sourceId} accepted.");
+					Transfer transferAccepted = Transfer.CreateResponse(transfer);
+					await SendEncrypted(sourceId, transferAccepted);
 					//special case: if the file is empty, no actual transferdata is send, therefore simulate receive manually:
 					if (transfer.FileSize == 0)
 					{
-						await ReceiveFile(TransferData.CreateRequest(transfer.Uuid, Array.Empty<byte>(), 0));
+						await ReceiveFile(TransferData.CreateRequest(transfer.Uuid, Array.Empty<byte>(), 0), sourceId);
 					}
 
 					break;
 				case PacketCode.Ok:
-					SmartConsole.WriteInfo($"Client {transfer.SourceId} accepted file transfer. Start sending file.");
-					_ = SendFile(transfer.SourceId, transfer.Uuid); //fire and forget. SendFile will handle itself
+					SmartConsole.WriteInfo($"Client {sourceId} accepted file transfer. Start sending file.");
+					_ = SendFile(sourceId, transfer.Uuid); //fire and forget. SendFile will handle itself
+					break;
+				case PacketCode.Ack:
+					SmartConsole.WriteSuccess($"Client {sourceId} received the file!");
 					break;
 				default:
 					throw new NotImplementedException($"Transfer code {transfer.Code} not implemented yet.");
@@ -501,7 +504,7 @@ namespace SODT_CLI
 		/// </summary>
 		/// <param name="transferData">The received transfer data to be written to the file.</param>
 		/// <returns></returns>
-		private async Task ReceiveFile(TransferData transferData)
+		private async Task ReceiveFile(TransferData transferData, byte remoteId)
 		{
 			//get file stream
 			int uuid = transferData.Uuid;
@@ -522,13 +525,15 @@ namespace SODT_CLI
 
                     SmartConsole.WriteSuccess($"File {fileName} received.");
 					await stream.FlushAsync();
-					if (!VerifyFileIntegretiy(stream, incomingFileStreamHashes[uuid]))
+					if (!VerifyFileIntegretiy(stream, incomingFileStreamMetaData[uuid].FileHash))
 					{
 						SmartConsole.WriteWarning($"The received File {fileName} does not match with the sent verification hash. The file's integretiy might be broken!");
 					}
 					stream.Close();
 					incomingFileStreams.Remove(uuid);
 					receivedFileProgress.Remove(uuid);
+                    incomingFileStreamMetaData.Remove(uuid);
+					await SendAcknowledgement(incomingFileStreamMetaData[uuid], remoteId);
 				}
 			}
 			else
@@ -541,6 +546,13 @@ namespace SODT_CLI
 		{
 			byte[] hash = SHA256.HashData(receivedFile);
 			return hash.SequenceEqual(verifyHash);
+		}
+
+		private async Task SendAcknowledgement(Transfer originalRequest, byte targetId)
+		{
+			Transfer ack = Transfer.CreateAcknowledgement(originalRequest);
+			await SendEncrypted(targetId, ack);
+
 		}
 		
 		/// <summary>
