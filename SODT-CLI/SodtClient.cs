@@ -14,11 +14,11 @@ namespace SODT_CLI
 		//DO NOT TOUCH THIS VALUE UNLESS YOU KNOW WHAT YOU ARE DOING
 		//the buffer size is 3003 because the json conversion messes with the encoded buffer size. It could be optimized by some bytes.
 		//the current value was calculated by trial and error.
-		private const int FileBufferSize = 3003;
+		private const int FileBufferSize = 3003 - MessageHelper.NonceSize - MessageHelper.TagSize; // TODO improve
 		private const byte ServerId = 1;
 		private static readonly string SaveFilePath = Path.Combine(
 			Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-			"Downloads"); // TODO test
+			"Downloads"); // Downloads is mostly the correct name. going with it for now
 		public byte OwnId { get; private set; }
 		private readonly TcpClient client = new();
 		
@@ -89,6 +89,8 @@ namespace SODT_CLI
 		/// </summary>
 		private readonly Dictionary<int, FileStream> incomingFileStreams = new();
 
+		private readonly Dictionary<int, byte[]> incomingFileStreamHashes = new();
+
 		/// <summary>
 		/// Contains the pending files that will be sent after the client has accepted the transfer.
 		/// </summary>
@@ -151,7 +153,7 @@ namespace SODT_CLI
 
 		public SodtClient(string ecdsaServerCertificatePath)
 		{
-			ecdsaServerCertificate = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            ecdsaServerCertificate = ECDsa.Create(ECCurve.NamedCurves.nistP256);
 			ecdsaServerCertificate.ImportFromPem(File.ReadAllText(ecdsaServerCertificatePath));
 		}
 		
@@ -421,11 +423,14 @@ namespace SODT_CLI
 			if (!File.Exists(filePath))
 				return false;
 			if (Directory.Exists(filePath))
+				return false; // TODO ask for recursive execution?
+			if (Path.GetFileName(filePath).Length > 512) // File Name to Long
 				return false;
 
 			try
 			{
-				Transfer transfer = Transfer.CreateRequest(Path.GetFileName(filePath), new FileInfo(filePath).Length, OwnId);
+				using FileStream fileStream = File.OpenRead(filePath); // used to compute hash
+				Transfer transfer = Transfer.CreateRequest(Path.GetFileName(filePath), new FileInfo(filePath).Length, OwnId, SHA256.HashData(fileStream));
 				pendingFiles.Add(transfer.Uuid, filePath);
 				await SendEncrypted(targetId, transfer);
 				return true;
@@ -443,7 +448,8 @@ namespace SODT_CLI
 				case PacketCode.Request:
 					//prepare receiving file
 					SmartConsole.WriteInfo($"Client {transfer.SourceId} requests to send file {transfer.FileName}.");
-					incomingFileStreams.Add(transfer.Uuid, new FileStream(Path.Combine(SaveFilePath, transfer.FileName), FileMode.Create, FileAccess.Write, FileShare.None));
+					incomingFileStreams.Add(transfer.Uuid, new FileStream(Path.Combine(SaveFilePath, transfer.FileName), FileMode.Create, FileAccess.ReadWrite, FileShare.None));
+					incomingFileStreamHashes.Add(transfer.Uuid, transfer.FileHash);
 					receivedFileProgress.Add(transfer.Uuid, transfer.FileSize); //TODO: implement permission check
 
 					//send ok
@@ -512,8 +518,14 @@ namespace SODT_CLI
 				//close file stream if transfer is complete
 				if (receivedFileProgress[uuid] <= 0)
 				{
-					SmartConsole.WriteSuccess($"File {Path.GetFileName(stream.Name)} received.");
+					string fileName = Path.GetFileName(stream.Name);
+
+                    SmartConsole.WriteSuccess($"File {fileName} received.");
 					await stream.FlushAsync();
+					if (!VerifyFileIntegretiy(stream, incomingFileStreamHashes[uuid]))
+					{
+						SmartConsole.WriteWarning($"The received File {fileName} does not match with the sent verification hash. The file's integretiy might be broken!");
+					}
 					stream.Close();
 					incomingFileStreams.Remove(uuid);
 					receivedFileProgress.Remove(uuid);
@@ -523,6 +535,12 @@ namespace SODT_CLI
 			{
 				SmartConsole.WriteWarning($"Received file data that was not requested. Ignoring Data. (Uuid: {transferData.Uuid}");
 			}
+		}
+
+		private static bool VerifyFileIntegretiy(FileStream receivedFile, byte[] verifyHash)
+		{
+			byte[] hash = SHA256.HashData(receivedFile);
+			return hash.SequenceEqual(verifyHash);
 		}
 		
 		/// <summary>

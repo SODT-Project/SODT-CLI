@@ -453,27 +453,25 @@ namespace SODT_Common
 		[JsonPropertyName("sourceId")]
 		public byte SourceId { get; init; }
 
-		private Transfer(PacketCode code, string fileName, long fileSize, byte sourceId)
+		[JsonPropertyName("filehash")]
+		public byte[] FileHash { get; init; }
+
+		private Transfer(PacketCode code, string fileName, long fileSize, byte sourceId, byte[] fileHash) :
+			this(new Random().Next(), code, fileName, fileSize, sourceId, fileHash)
+		{ }
+		private Transfer(int uuid, PacketCode code, string fileName, long fileSize, byte sourceId, byte[] fileHash)
 		{
-			Uuid = new Random().Next();
+			Uuid = uuid;
 			Code = (int)code;
 			Type = "transfer";
 			FileName = fileName;
 			FileSize = fileSize;
 			SourceId = sourceId;
+			FileHash = fileHash;
 		}
-		private Transfer(int uuid, PacketCode code, string fileName, long fileSize, byte sourceId)
+		public static Transfer CreateRequest(string fileName, long fileSize, byte sourceId, byte[] fileHash)
 		{
-			Uuid = new Random().Next();
-			Code = (int)code;
-			Type = "transfer";
-			FileName = fileName;
-			FileSize = fileSize;
-			SourceId = sourceId;
-		}
-		public static Transfer CreateRequest(string fileName, long fileSize, byte sourceId)
-		{
-			return new Transfer(PacketCode.Request, fileName, fileSize, sourceId);
+			return new Transfer(PacketCode.Request, fileName, fileSize, sourceId, fileHash);
 		}
 		public static Transfer CreateResponse(Transfer request, byte sourceId)
 		{
@@ -483,7 +481,8 @@ namespace SODT_Common
 				(PacketCode)request.Code,
 				request.FileName,
 				request.FileSize,
-				request.SourceId
+				request.SourceId,
+				request.FileHash
 			);
 		}
 
