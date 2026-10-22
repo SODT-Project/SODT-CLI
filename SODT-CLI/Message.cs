@@ -61,7 +61,7 @@ namespace SODT_Common
 		public const int MessageContentSize = FullMessageSize - HeaderSize;
 		
 		public const int MessageWithContentSize = MessageContentSize + ContentLengthSize;
-		public static byte[] ToBytes(IBaseMessage baseMessage)
+		public static byte[] ToBytes(IBaseMessage baseMessage) // TODO optimize
 		{
 			//get content 
 			byte[] content = Encoding.UTF8.GetBytes(baseMessage.ToJson());
@@ -479,7 +479,7 @@ namespace SODT_Common
 			// keep the same UUID
 			return new Transfer(
 				request.Uuid,
-				(PacketCode)request.Code,
+				PacketCode.Ok,
 				request.FileName,
 				request.FileSize,
 				request.FileHash
@@ -496,6 +496,18 @@ namespace SODT_Common
 				request.FileHash
 			);
         }
+		
+		public static Transfer CreateError(Transfer request)
+		{
+			// keep the same UUID
+			return new Transfer(
+				request.Uuid,
+				PacketCode.Error,
+				request.FileName,
+				request.FileSize,
+				request.FileHash
+			);
+		}
 
 		public string ToJson()
 		{
