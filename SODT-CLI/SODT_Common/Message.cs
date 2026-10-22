@@ -1,5 +1,4 @@
-﻿using System.Security.Cryptography;
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -8,27 +7,27 @@ namespace SODT_Common
 	public enum PacketCode
 	{
 		/// <summary>
-		/// Request packet code, typically sent by clients to initiate a connection or request data transfer.
+		/// Generic request packet code, typically sent by clients to initiate a connection or request data transfer.
 		/// </summary>
 		Request = 100,
 
 		/// <summary>
-		/// OK packet code, indicating a successful response from the server or the completion of an operation.
+		/// Generic OK packet code, indicating a successful response from the server or the completion of an operation.
 		/// </summary>
 		Ok = 200,
 
 		/// <summary>
-		/// TODO comment
+		/// Acknowledgement packet code, used to confirm the receipt of a file during a file transfer operation.
 		/// </summary>
 		Ack = 250,
 
 		/// <summary>
-		/// Denied packet code, indicating that a request cannot be fulfilled due to errors or restrictions.
+		/// Generic denied packet code, indicating that a request cannot be fulfilled due to errors or restrictions.
 		/// </summary>
 		Denied = 300,
 
 		/// <summary>
-		/// Error packet code, used to report any issues encountered during the execution of an operation.
+		/// Generic error packet code, used to report any issues encountered during the execution of an operation.
 		/// </summary>
 		Error = 400
 	}
@@ -314,11 +313,15 @@ namespace SODT_Common
 			SessionHash = sessionHash;
 			Certificate = certificate;
 		}
-
-		public static KeyExchange Create(PacketCode code, byte[] key, byte[] certificate, byte[]? sessionHash)
+		public static KeyExchange CreateRequest(byte[] key, byte[] certificate, byte[]? sessionHash)
 		{
-			return new KeyExchange(code, key, certificate, sessionHash);
+			return new KeyExchange(PacketCode.Request, key, certificate, sessionHash);
 		}
+		public static KeyExchange CreateResponse(byte[] key, byte[] certificate, byte[]? sessionHash)
+		{
+			return new KeyExchange(PacketCode.Ok, key, certificate, sessionHash);
+		}
+		
 		public static KeyExchange CreateError(KeyExchange keyExchange)
 		{
 			return new KeyExchange(
@@ -329,6 +332,18 @@ namespace SODT_Common
 				keyExchange.SessionHash
 			);
 		}
+		
+		public static KeyExchange CreateDenied(KeyExchange keyExchange)
+		{
+			return new KeyExchange(
+				keyExchange.Uuid,
+				PacketCode.Denied,
+				keyExchange.Key,
+				keyExchange.Certificate,
+				keyExchange.SessionHash
+			);
+		}
+		
 		public string ToJson()
 		{
 			return JsonSerializer.Serialize(this);
@@ -509,6 +524,18 @@ namespace SODT_Common
 			return new Transfer(
 				request.Uuid,
 				PacketCode.Error,
+				request.FileName,
+				request.FileSize,
+				request.FileHash
+			);
+		}
+		
+		public static Transfer CreateDenied(Transfer request)
+		{
+			// keep the same UUID
+			return new Transfer(
+				request.Uuid,
+				PacketCode.Denied,
 				request.FileName,
 				request.FileSize,
 				request.FileHash

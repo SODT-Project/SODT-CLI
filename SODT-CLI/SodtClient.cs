@@ -201,24 +201,20 @@ namespace SODT_CLI
 		}
 
 		/// <summary>
-		/// Connect to the server and send a discovery message.
-		/// Furthermore, start the receive loop.
+		/// Connects to the server via Discovery and starts the receive loop.
 		/// </summary>
-		/// <param name="host"></param>
-		/// <param name="port"></param>
-		/// <returns></returns>
+		/// <param name="host">The host of the server.</param>
+		/// <param name="port">The port of the server.</param>
 		public async Task Connect(string host, int port)
 		{
-			//connect to server
 			await client.ConnectAsync(host, port);
-			//start receive
 			_ = Receive(); // fire and forget. Receive will handle itself
+			
 			//send discovery key exchange
 			ecdhSessionKeyGenerators.Add(ServerId, ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
 			byte[] ecdhPublicKey = ecdhSessionKeyGenerators[ServerId].ExportSubjectPublicKeyInfo();
 			Discovery discovery = Discovery.CreateRequest(ecdhPublicKey);
 			await SendUnencrypted(ServerId, discovery);
-
 		}
 
 		/// <summary>
@@ -232,24 +228,24 @@ namespace SODT_CLI
 			{
 				await SendEncrypted(ServerId, Disconnect.CreateRequest());
 			}
-			catch { }
+			catch { /*Ignore. Announcing Disconnect is optional anyway.*/ }
 			OwnId = 0;
 			aesSessionKeys.Clear();
 			ecdhSessionKeyGenerators.Clear();
 			ecdsaSessionCertificate.Dispose();
-			client.Dispose();
+			SessionPassword = null;
+			client.Close();
 		}
 
 		/// <summary>
-		/// Creates a new receive loop that listens for incoming messages asynchroniously.
+		/// Creates a new receive loop that listens for incoming messages asynchronously.
 		/// </summary>
-		/// <returns></returns>
-		/// <exception cref="InvalidOperationException"></exception>
 		private async Task Receive()
 		{
 			byte[] buffer = new byte[MessageHelper.FullMessageSize];
 			NetworkStream stream = client.GetStream();
-			try {
+			try
+			{
 				while (client.Connected)
 				{
 					int bytesRead = 0;
@@ -263,11 +259,14 @@ namespace SODT_CLI
 
 					await HandleReceivedBuffer(buffer, buffer[1]);
 				}
-				SmartConsole.WriteInfo("Disconnected from server.");
 			}
 			catch (Exception e)
 			{
 				SmartConsole.WriteError($"Receive loop failed with exception: {e}");
+			}
+			finally
+			{
+				SmartConsole.WriteInfo("Disconnected from server.");
 				await DisconnectFromServer();
 			}
 		}
@@ -276,18 +275,17 @@ namespace SODT_CLI
 			//SmartConsole.WriteDebug("Received ping from server. Sending pong.");
 			await SendEncrypted(ServerId, PingPong.CreateResponse());
 		}
-
+		
 		/// <summary>
-		/// Decrypts a message with the aes key of the source client.
+		/// Decrypts the received message from the server or a client.
+		/// If the message is unencrypted, it will be parsed directly.
+		/// If the message is encrypted, it will be decrypted with the aes session key for the source id.
 		/// </summary>
-		/// <param name="buffer"> The buffer that contains the encrypted message.</param>
+		/// <param name="buffer">The buffer that contains the encrypted message.</param>
+		/// <param name="sourceId">The id of the client that sent the message.</param>
 		/// <returns> The decrypted <see cref="IBaseMessage"/> message or <see langword="null"/> if the message type is unknown.</returns>
-		/// <exception cref="InvalidOperationException"></exception>
-		private IBaseMessage? Decrypt(Span<byte> buffer)
+		private IBaseMessage? Decrypt(Span<byte> buffer, byte sourceId)
 		{
-			byte sourceId = buffer[1];
-			
-			// decrypt message
 			Span<byte> decryptedMessage = new byte[MessageHelper.MessageWithContentSize];
 			// get sum of all values in the tag and nonce to check if they are all zero. If they are all zero, the message is unencrypted.
 			byte[] zeroCheck = new byte[MessageHelper.NonceSize + MessageHelper.TagSize];
@@ -295,9 +293,9 @@ namespace SODT_CLI
 			
 			lock (cryptoLock)
 			{
-	            if (!aesSessionKeys.TryGetValue(sourceId, out AesGcm? aes) || tagAndNonce.SequenceEqual(zeroCheck)) // this or check is experiemental. if unecrypted (eg. forced key exchange) the message is unencrypted although the client has a key for the sourceId.
+	            if (!aesSessionKeys.TryGetValue(sourceId, out AesGcm? aes) || tagAndNonce.SequenceEqual(zeroCheck))
 				{
-					SmartConsole.WriteWarning("An unencrypted message was received. Is this a key exchange?");
+					SmartConsole.WriteDebug("An unencrypted message was received. Is this a key exchange?");
 					decryptedMessage = buffer[MessageHelper.HeaderSizeWithoutContentLengthSize..];
 				}
 	            else
@@ -308,9 +306,10 @@ namespace SODT_CLI
             // parse message
             return MessageHandler.ParseDecryptedMessage(decryptedMessage);
 		}
+		
 		private async Task HandleReceivedBuffer(byte[] buffer, byte sourceId)
 		{
-			var message = Decrypt(buffer);
+			var message = Decrypt(buffer, sourceId);
 			if (message is Discovery or PingPong or ClientList && sourceId != ServerId)
 			{
 				SmartConsole.WriteWarning($"Received message from client {sourceId} that should only be sent by the server. Ignoring message.");
@@ -355,17 +354,16 @@ namespace SODT_CLI
 			
 			// verify discovery message
 			byte[] clientEcdhPublicKey = ecdhSessionKeyGenerators[ServerId].ExportSubjectPublicKeyInfo();
-			byte[] serverEcdhPublicKey = discovery.PublicKey;
-			byte[] toVerify = [..clientEcdhPublicKey, ..serverEcdhPublicKey, discovery.Id];
+			byte[] toVerify = [..clientEcdhPublicKey, ..discovery.PublicKey /*Server's ECDH public key*/, discovery.Id];
 			if (!ecdsaServerCertificate.VerifyData(toVerify, discovery.Signature, HashAlgorithmName.SHA256))
 			{
 				SmartConsole.WriteError("Discovery message from server is signed with an invalid signature. Possible man-in-the-middle attack. Disconnecting.");
 				await DisconnectFromServer();
 				return;
 			}
+			
 			// generate aes session key for server
 			aesSessionKeys[ServerId] = EncryptionHandler.GenerateSessionKey(ecdhSessionKeyGenerators[ServerId], discovery.PublicKey);
-			
 			// Set own id.
 			OwnId = discovery.Id;
 			SmartConsole.WriteDebug($"Connected to server with id {OwnId}.");
@@ -374,36 +372,40 @@ namespace SODT_CLI
 		/// <summary>
 		/// Sends a request to exchange a key with the target client.
 		/// </summary>
-		/// <param name="targetId"></param>
+		/// <param name="targetId">The id of the client to exchange a key with.</param>
 		public async Task RequestKeyExchange(byte targetId)
 		{
 			SmartConsole.WriteInfo($"Requesting key exchange with {targetId}.");
-			//send key exchange request
-			if (ecdhSessionKeyGenerators.TryGetValue(targetId, out ECDiffieHellman? oldEcdh))
-			{
-				oldEcdh.Dispose();
-			}
 			ecdhSessionKeyGenerators[targetId] = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-			KeyExchange exchange = KeyExchange.Create(PacketCode.Request, ecdhSessionKeyGenerators[targetId].ExportSubjectPublicKeyInfo(), ecdsaSessionCertificate.ExportSubjectPublicKeyInfo(), publicSessionPasswordHash);
+			KeyExchange exchange = KeyExchange.CreateRequest(ecdhSessionKeyGenerators[targetId].ExportSubjectPublicKeyInfo(), ecdsaSessionCertificate.ExportSubjectPublicKeyInfo(), publicSessionPasswordHash);
 			await SendUnencrypted(targetId, exchange);
 		}
+		
+		/// <summary>
+		/// Handles a key exchange message from the target client. This can be a request, an acceptance, or a denial of the key exchange.
+		/// </summary>
+		/// <param name="exchange">The key exchange message to handle.</param>
+		/// <param name="remoteId">The id of the remote client.</param>
+		/// <exception cref="NotImplementedException">Thrown when the key exchange status code is not implemented.</exception>
 		private async Task HandleKeyExchange(KeyExchange exchange, byte remoteId)
 		{
 			//handle possible errors
 			if (exchange.Key == null)
 			{
 				SmartConsole.WriteError($"Key exchange between {OwnId} and {remoteId} failed because the key is null.");
+				await SendUnencrypted(remoteId, KeyExchange.CreateError(exchange));
 				return;
-				// TODO write a response message to the other client?
 			}
+
 			// additionally check of same session password hashes
-			if ((PacketCode)exchange.Code == PacketCode.Request || (PacketCode)exchange.Code == PacketCode.Ok)
+			PacketCode code = (PacketCode)exchange.Code;
+			if (code == PacketCode.Request || code == PacketCode.Ok)
 			{
 				if (!EncryptionHandler.DoesSessionHashMatch(publicSessionPasswordHash, exchange.SessionHash))
 				{
 					SmartConsole.WriteError("Key exchange failed because the session password hashes do not match.");
-					return;
-					// TODO send a response message to the other client?
+					await SendUnencrypted(remoteId, KeyExchange.CreateDenied(exchange));
+					return;	
 				}
 			}
 			
@@ -415,7 +417,7 @@ namespace SODT_CLI
 					aesSessionKeys[remoteId] = EncryptionHandler.GenerateSessionKey(ecdhSessionKeyGenerators[remoteId], exchange.Key);
 					//send ok
 					SmartConsole.WriteInfo($"Key exchange with {remoteId} accepted.");
-					KeyExchange exchangeAccepted = KeyExchange.Create(PacketCode.Ok, ecdhSessionKeyGenerators[remoteId].ExportSubjectPublicKeyInfo(), ecdsaSessionCertificate.ExportSubjectPublicKeyInfo(), publicSessionPasswordHash);
+					KeyExchange exchangeAccepted = KeyExchange.CreateResponse(ecdhSessionKeyGenerators[remoteId].ExportSubjectPublicKeyInfo(), ecdsaSessionCertificate.ExportSubjectPublicKeyInfo(), publicSessionPasswordHash);
 					await SendUnencrypted(remoteId, exchangeAccepted);
 					break;
 				case PacketCode.Ok: // PaketCode.Ok is received when the target client accepts the key exchange
@@ -431,7 +433,7 @@ namespace SODT_CLI
 				case PacketCode.Denied:
 					aesSessionKeys.Remove(remoteId);
 					ecdhSessionKeyGenerators.Remove(remoteId);
-					SmartConsole.WriteError($"Key exchange with client {remoteId} failed. ErrorCode: {exchange.Code}");
+					SmartConsole.WriteError($"Key exchange with client {remoteId} failed. ErrorCode: {(PacketCode)exchange.Code}");
 					break;
 				default:
 					SmartConsole.WriteError($"Key exchange code {exchange.Code} not implemented yet.");
@@ -439,12 +441,15 @@ namespace SODT_CLI
 			}
 		}
 		
+		/// <summary>
+		/// Sends a request to the target client to transfer a file. The file will be sent after the target client accepts the transfer.
+		/// </summary>
+		/// <param name="targetId"> The ID of the target client. </param>
+		/// <param name="filePath"> The path to the file to be transferred. </param>
+		/// <returns>True if the file transfer request is sent successfully, false otherwise.</returns>
 		public async Task<bool> RequestFileTransfer(byte targetId, string filePath)
 		{
-			//check if filePath is valid
-			if (!File.Exists(filePath))
-				return false;
-			if (Directory.Exists(filePath))
+			if (!File.Exists(filePath) || Directory.Exists(filePath)) // Check if filePath is a valid file and not a directory
 				return false;
 			if (Path.GetFileName(filePath).Length > 512) // File Name to Long
 				return false;
@@ -470,22 +475,16 @@ namespace SODT_CLI
 				switch ((PacketCode)transfer.Code)
 				{
 					case PacketCode.Request:
-						//prepare receiving file
-						SmartConsole.WriteInfo($"Client {sourceId} requests to send file {transfer.FileName}.");
-						incomingFileStreams.Add(transfer.Uuid, new FileStream(Path.Combine(SaveFilePath, transfer.FileName), FileMode.Create, FileAccess.ReadWrite, FileShare.None));
-						incomingFileStreamMetaData.Add(transfer.Uuid, transfer);
-						receivedFileProgress.Add(transfer.Uuid, transfer.FileSize); //TODO: implement permission check
-
-						//send ok
-						SmartConsole.WriteInfo($"File transfer with {sourceId} accepted.");
-						Transfer transferAccepted = Transfer.CreateResponse(transfer);
-						await SendEncrypted(sourceId, transferAccepted);
-						//special case: if the file is empty, no actual transferdata is send, therefore simulate receive manually:
-						if (transfer.FileSize == 0)
+						if (await PrepareReceiveFile(transfer, sourceId))
 						{
-							await ReceiveFile(TransferData.CreateRequest(transfer.Uuid, Array.Empty<byte>(), 0), sourceId);
+							SmartConsole.WriteInfo($"File transfer request from client {sourceId} accepted. Sending acceptance.");
+							await SendEncrypted(sourceId, Transfer.CreateResponse(transfer));
 						}
-
+						else
+						{
+							SmartConsole.WriteInfo($"File transfer request from client {sourceId} rejected. Sending denial.");
+							await SendEncrypted(sourceId, Transfer.CreateDenied(transfer));
+						}
 						break;
 					case PacketCode.Ok:
 						SmartConsole.WriteInfo($"Client {sourceId} accepted file transfer. Start sending file.");
@@ -494,8 +493,13 @@ namespace SODT_CLI
 					case PacketCode.Ack:
 						SmartConsole.WriteSuccess($"Client {sourceId} reported successful receipt of file {transfer.FileName}");
 						break;
+					case PacketCode.Denied:
+						SmartConsole.WriteInfo($"Client {sourceId} denied the file transfer. File transfer aborted.");
+						CleanIncomingFileTransfer(transfer.Uuid);
+						break;
 					case PacketCode.Error:
 						SmartConsole.WriteError($"Client {sourceId} reported an error with the file transfer. File transfer aborted.");
+						CleanIncomingFileTransfer(transfer.Uuid);
 						break;
 					default:
 						throw new NotImplementedException($"Transfer code {transfer.Code} not implemented yet.");
@@ -508,14 +512,37 @@ namespace SODT_CLI
 				Transfer transferError = Transfer.CreateError(transfer);
 				await SendEncrypted(sourceId, transferError);
 				// cleanup
-				if (incomingFileStreams.TryGetValue(transfer.Uuid, out FileStream? fileStream))
-				{
-                    fileStream.Close();
-					incomingFileStreams.Remove(transfer.Uuid);
-				}
-				incomingFileStreamMetaData.Remove(transfer.Uuid);
-				receivedFileProgress.Remove(transfer.Uuid);
+				CleanIncomingFileTransfer(transfer.Uuid);
 			}
+		}
+		
+		private void CleanIncomingFileTransfer(int transferUuid)
+		{
+			if (incomingFileStreams.TryGetValue(transferUuid, out FileStream? fileStream))
+			{
+				fileStream.Close();
+				incomingFileStreams.Remove(transferUuid);
+			}
+			incomingFileStreamMetaData.Remove(transferUuid);
+			receivedFileProgress.Remove(transferUuid);
+		}
+		
+		private async Task<bool> PrepareReceiveFile(Transfer transfer, byte sourceId)
+		{
+			//prepare receiving file
+			bool permission = await SmartConsole.AskYesNo($"Client {sourceId} requests a file transfer. Do you want to accept the file {transfer.FileName} ({transfer.FileSize / 1000} KB)?");
+			if (!permission) return false;
+			
+			incomingFileStreams.Add(transfer.Uuid, new FileStream(Path.Combine(SaveFilePath, transfer.FileName), FileMode.Create, FileAccess.ReadWrite, FileShare.None));
+			incomingFileStreamMetaData.Add(transfer.Uuid, transfer);
+			receivedFileProgress.Add(transfer.Uuid, transfer.FileSize);
+			
+			//special case: if the file is empty, no actual data is sent, therefore simulate receive manually:
+			if (transfer.FileSize == 0)
+			{
+				await ReceiveFile(TransferData.CreateRequest(transfer.Uuid, Array.Empty<byte>(), 0), sourceId);
+			}
+			return true;
 		}
 
 		private async Task SendFile(byte targetId, int transferUuid)
@@ -557,12 +584,7 @@ namespace SODT_CLI
 				stream?.Close();
 			}
 		}
-
-		/// <summary>
-		/// Writes the received transfer data to the file. If the transfer is complete, the file stream is closed.
-		/// </summary>
-		/// <param name="transferData">The received transfer data to be written to the file.</param>
-		/// <returns></returns>
+		
 		private async Task ReceiveFile(TransferData transferData, byte remoteId)
 		{
 			//get file stream
@@ -584,7 +606,7 @@ namespace SODT_CLI
 
                     SmartConsole.WriteSuccess($"File {fileName} received.");
 					await stream.FlushAsync();
-					if (!VerifyFileIntegretiy(stream, incomingFileStreamMetaData[uuid].FileHash))
+					if (!VerifyFileIntegrity(stream, incomingFileStreamMetaData[uuid].FileHash))
 					{
 						SmartConsole.WriteWarning($"The received File {fileName} does not match with the sent verification hash. The file's integretiy might be broken!");
 					}
@@ -601,7 +623,7 @@ namespace SODT_CLI
 			}
 		}
 
-		private static bool VerifyFileIntegretiy(FileStream receivedFile, byte[] verifyHash)
+		private static bool VerifyFileIntegrity(FileStream receivedFile, byte[] verifyHash)
 		{
 			receivedFile.Position = 0;
 			byte[] hash = SHA256.HashData(receivedFile);
@@ -612,7 +634,6 @@ namespace SODT_CLI
 		{
 			Transfer ack = Transfer.CreateAcknowledgement(originalRequest);
 			await SendEncrypted(targetId, ack);
-
 		}
 		
 		/// <summary>

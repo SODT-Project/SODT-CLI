@@ -9,15 +9,11 @@ namespace SODT_CLI
 	internal static class SmartConsole
 	{
 		/// <summary>
-		/// Queue that contains all write requests that are waiting to be executed
-		/// </summary>
-		private readonly static Queue<Task> writeRequests = new();
-
-		/// <summary>
 		/// Object that is used to lock the Console to prevent multiple threads from writing at the same time
 		/// </summary>
 		public static object LockObject { get; } = new();
-
+		private static bool yesNoQuestionActive = false;
+		private static TaskCompletionSource<bool> yesNoTask = new();
 		/// <summary>
 		/// Adds a message to the writeRequests queue.
 		/// </summary>
@@ -69,11 +65,66 @@ namespace SODT_CLI
 		{
 			RequestWriteLine(text, ConsoleColor.Yellow);
 		}
-
-		public static void WriteLine()
+		
+		public static async Task<bool> AskYesNo(string question)
 		{
-			WriteInfo("");
+			yesNoQuestionActive = true;
+			WriteInfo(question + " (y/n): ");
+			await yesNoTask.Task;
+			return yesNoTask.Task.Result;
 		}
+		
+		
+		/// <summary>
+		/// Reads a line from the console and splits it.
+		/// File paths are kept together if they are in quotes.
+		/// </summary>
+		/// <param name="message"></param>
+		/// <returns>Command like structure. [0] is the keyword, [1] is the first argument, [2] is the second argument, ...</returns>
+		public static string[] GetInput(string message)
+		{
+			Console.Write(message);
+			string input = Console.ReadLine() ?? "";
+			
+			// overwrite input if a yes/no question is active and return empty array to command handler to not execute any command so that the yes/no question can be answered
+			if (yesNoQuestionActive) 
+			{
+				yesNoQuestionActive = false;
+				while (input != "y" && input != "n")
+				{
+					WriteInfo("Please answer with 'y' or 'n': ");
+					input = Console.ReadLine() ?? "";
+				}
+				yesNoTask.SetResult(input == "y");
+				yesNoTask = new();
+				return Array.Empty<string>();
+			}
+
+			//split input but keep file paths together
+			List<string> parts = new();
+			bool isPath = false;
+			string current = "";
+			foreach (char c in input)
+			{
+				if (c == ' ' && !isPath)
+				{
+					parts.Add(current);
+					current = "";
+				}
+				else if (c == '"')
+				{
+					isPath = !isPath;
+				}
+				else
+				{
+					current += c;
+				}
+			}
+			if (!string.IsNullOrEmpty(current))
+				parts.Add(current);
+			return parts.ToArray();
+		}
+		
 		public static void WriteDebug(string text)
 		{
 			RequestWriteLine("DEBUG: " + text, ConsoleColor.Gray);
