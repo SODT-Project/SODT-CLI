@@ -18,6 +18,11 @@ namespace SODT_Common
 		Ok = 200,
 
 		/// <summary>
+		/// TODO comment
+		/// </summary>
+		Ack = 250,
+
+		/// <summary>
 		/// Denied packet code, indicating that a request cannot be fulfilled due to errors or restrictions.
 		/// </summary>
 		Denied = 300,
@@ -56,7 +61,7 @@ namespace SODT_Common
 		public const int MessageContentSize = FullMessageSize - HeaderSize;
 		
 		public const int MessageWithContentSize = MessageContentSize + ContentLengthSize;
-		public static byte[] ToBytes(IBaseMessage baseMessage)
+		public static byte[] ToBytes(IBaseMessage baseMessage) // TODO optimize
 		{
 			//get content 
 			byte[] content = Encoding.UTF8.GetBytes(baseMessage.ToJson());
@@ -450,40 +455,57 @@ namespace SODT_Common
 		[JsonPropertyName("filesize")]
 		public long FileSize { get; init; }
 
-		[JsonPropertyName("sourceId")]
-		public byte SourceId { get; init; }
+		[JsonPropertyName("filehash")]
+		public byte[] FileHash { get; init; }
 
-		private Transfer(PacketCode code, string fileName, long fileSize, byte sourceId)
+		private Transfer(PacketCode code, string fileName, long fileSize, byte[] fileHash) :
+			this(new Random().Next(), code, fileName, fileSize, fileHash)
+		{ }
+		private Transfer(int uuid, PacketCode code, string fileName, long fileSize, byte[] fileHash)
 		{
-			Uuid = new Random().Next();
+			Uuid = uuid;
 			Code = (int)code;
 			Type = "transfer";
 			FileName = fileName;
 			FileSize = fileSize;
-			SourceId = sourceId;
+			FileHash = fileHash;
 		}
-		private Transfer(int uuid, PacketCode code, string fileName, long fileSize, byte sourceId)
+		public static Transfer CreateRequest(string fileName, long fileSize, byte[] fileHash)
 		{
-			Uuid = new Random().Next();
-			Code = (int)code;
-			Type = "transfer";
-			FileName = fileName;
-			FileSize = fileSize;
-			SourceId = sourceId;
+			return new Transfer(PacketCode.Request, fileName, fileSize, fileHash);
 		}
-		public static Transfer CreateRequest(string fileName, long fileSize, byte sourceId)
-		{
-			return new Transfer(PacketCode.Request, fileName, fileSize, sourceId);
-		}
-		public static Transfer CreateResponse(Transfer request, byte sourceId)
+		public static Transfer CreateResponse(Transfer request)
 		{
 			// keep the same UUID
 			return new Transfer(
 				request.Uuid,
-				(PacketCode)request.Code,
+				PacketCode.Ok,
 				request.FileName,
 				request.FileSize,
-				request.SourceId
+				request.FileHash
+			);
+		}
+		public static Transfer CreateAcknowledgement(Transfer request)
+		{
+			// keep the same UUID
+			return new Transfer(
+				request.Uuid,
+				PacketCode.Ack,
+				request.FileName,
+				request.FileSize,
+				request.FileHash
+			);
+        }
+		
+		public static Transfer CreateError(Transfer request)
+		{
+			// keep the same UUID
+			return new Transfer(
+				request.Uuid,
+				PacketCode.Error,
+				request.FileName,
+				request.FileSize,
+				request.FileHash
 			);
 		}
 
