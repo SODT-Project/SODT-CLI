@@ -49,6 +49,12 @@ namespace SODT_Common
 		public const int HeaderSizeWithoutContentLengthSize = HeaderSize - ContentLengthSize;
 		
 		/// <summary>
+		/// Maximum size of the file buffer. This is the maximum size of file data that can be sent at once.
+		/// </summary>
+		// 1088 bytes are reserved for the json overhead of the file data message. This a worst case scenario. The actual overhead is usually smaller
+		public const int FileBufferSize = FullMessageSize - HeaderSize - 1088;
+		
+		/// <summary>
 		/// The total size of the message content plus 2 bytes that define the inner content size.
 		/// </summary>
 		public const int MessageWithHeaders = FullMessageSize - IdSize;
@@ -69,7 +75,7 @@ namespace SODT_Common
 			//check if content is too large																  
 			if (content.Length > MessageContentSize)
 			{
-				throw new ArgumentException("Message size is too large");
+				throw new ArgumentException($"Message size is too large: {content.Length} bytes is greater than the maximum allowed size of {MessageContentSize} bytes.");
 			}
 			//create byte array
 			byte[] contentLength = BitConverter.GetBytes((ushort)content.Length); //contentLength is always 2 bytes because it's convertet to ushort

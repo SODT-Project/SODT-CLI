@@ -7,14 +7,6 @@ namespace SODT_CLI
 {
 	internal class SodtClient
 	{
-		
-		/// <summary>
-		/// Maximum size of the file buffer. This is the maximum size of file data that can be sent at once.
-		/// </summary>
-		//DO NOT TOUCH THIS VALUE UNLESS YOU KNOW WHAT YOU ARE DOING
-		//the buffer size is 3003 because the json conversion messes with the encoded buffer size. It could be optimized by some bytes.
-		//the current value was calculated by trial and error.
-		private const int FileBufferSize = 3003 - MessageHelper.NonceSize - MessageHelper.TagSize; // TODO improve
 		private const byte ServerId = 1;
 		private static readonly string SaveFilePath = Path.Combine(
 			Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -534,15 +526,13 @@ namespace SODT_CLI
 				string filePath = pendingFiles[transferUuid];
 				stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.None);
 				sendFileProgress.Add(transferUuid, stream.Length);
-				Memory<byte> buffer = new Memory<byte>(new byte[FileBufferSize]); //wrapping the buffer in a memory object for better performance
+				Memory<byte> buffer = new byte[MessageHelper.FileBufferSize]; //wrapping the buffer in a memory object for better performance
 				while (true)
 				{
 					long startPositionInFile = stream.Position;
 					int bytesRead = await stream.ReadAsync(buffer);
 					if (bytesRead == 0) break;
-					//buffer[..bytesRead] reduces the buffer to the actual data if the buffer is not full
 					var req = TransferData.CreateRequest(transferUuid, buffer[..bytesRead], startPositionInFile);
-					//await Task.Delay(1); // small delay to prevent flooding the network with packets. TODO: implement a better flow control
 					await SendEncrypted(targetId, req);
 					//update progress
 					lock (sendFileProgress)
