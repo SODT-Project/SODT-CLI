@@ -22,7 +22,7 @@ namespace SODT_CLI
 		public byte OwnId { get; private set; }
 		private readonly TcpClient client = new();
 		private readonly SemaphoreSlim sendSemaphore = new(1, 1);
-		private readonly object cryptoLock = new();
+		private readonly Lock cryptoLock = new();
 		
 		/// <summary>
 		/// Contains the session password hash for optional client to client authentication.
@@ -255,29 +255,21 @@ namespace SODT_CLI
 		/// <exception cref="InvalidOperationException"></exception>
 		private async Task Receive()
 		{
-			//init buffer and get stream
-			Memory<byte> buffer = new byte[MessageHelper.FullMessageSize];
+			byte[] buffer = new byte[MessageHelper.FullMessageSize];
 			NetworkStream stream = client.GetStream();
-			// receive loop
 			try {
 				while (client.Connected)
 				{
-					//wait for message
-					if (client.Client.Available < MessageHelper.FullMessageSize)
+					int bytesRead = 0;
+					while (bytesRead < buffer.Length)
 					{
-						await Task.Delay(10);
-						continue;
+						int read = await stream.ReadAsync(buffer.AsMemory(bytesRead));
+						if (read == 0)
+							return;
+						bytesRead += read;
 					}
-					int bytesRead = await stream.ReadAsync(buffer);
-					if (bytesRead == 0) break; // on disconnect
-					if (bytesRead != MessageHelper.FullMessageSize)
-					{
-						SmartConsole.WriteError($"Received message with wrong size. Expected {MessageHelper.FullMessageSize} bytes, but received {bytesRead} bytes. Ignoring message.");
-						break;
-					}
-					
-					_ = HandleReceivedBuffer(buffer.ToArray(), buffer.Span[1]);
-					
+
+					await HandleReceivedBuffer(buffer, buffer[1]);
 				}
 				SmartConsole.WriteInfo("Disconnected from server.");
 			}
@@ -286,7 +278,6 @@ namespace SODT_CLI
 				SmartConsole.WriteError($"Receive loop failed with exception: {e}");
 				await DisconnectFromServer();
 			}
-			throw new InvalidOperationException("Connection lost.");
 		}
 		private async Task HandlePingPong()
 		{
