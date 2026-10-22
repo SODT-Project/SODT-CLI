@@ -175,9 +175,9 @@ namespace SODT_CLI
 				while (!client.IsKeyExchanged(targetId)) Thread.Sleep(20); //wait for the key exchange to be completed
 			}
 			//send the file
-			if (client.RequestFileTransfer(targetId, filePath).Result)
-				SmartConsole.WriteInfo($"Transfer request successful. Client {targetId} accepted {Path.GetFileName(filePath)}");
-			else
+			var request = client.RequestFileTransfer(targetId, filePath);
+			request.Wait();
+			if (!request.Result)
 				SmartConsole.WriteError($"Transfer request failed. Client {targetId} rejected {Path.GetFileName(filePath)}");
 		}
 		private (byte, string) ValidateArgs(params string[] args)

@@ -247,14 +247,20 @@ namespace SODT_CLI
 			//init buffer and get stream
 			byte[] buffer = new byte[MessageHelper.FullMessageSize];
 			NetworkStream stream = client.GetStream();
-			
+			int debug = 0;
 			// receive loop
 			while (client.Connected)
 			{
+				if (debug++ > 500)
+				{
+					SmartConsole.WriteDebug("Receive loop is still running.");
+					debug = 0;
+				}
 				//wait for message
-				while (client.Client.Available < MessageHelper.FullMessageSize)
+				if (client.Client.Available < MessageHelper.FullMessageSize)
 				{
 					await Task.Delay(10);
+					continue;
 				}
 				int bytesRead = await stream.ReadAsync(buffer);
 				if (bytesRead == 0) break; // on disconnect
@@ -429,8 +435,8 @@ namespace SODT_CLI
 
 			try
 			{
-				using FileStream fileStream = File.OpenRead(filePath); // used to compute hash
-				Transfer transfer = Transfer.CreateRequest(Path.GetFileName(filePath), new FileInfo(filePath).Length, SHA256.HashData(fileStream));
+				await using FileStream fileStream = File.OpenRead(filePath); // used to compute hash
+				Transfer transfer = Transfer.CreateRequest(Path.GetFileName(filePath), new FileInfo(filePath).Length, await SHA256.HashDataAsync(fileStream));
 				pendingFiles.Add(transfer.Uuid, filePath);
 				await SendEncrypted(targetId, transfer);
 				return true;
