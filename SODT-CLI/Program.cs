@@ -11,19 +11,8 @@ namespace SODT_CLI
 	{
 		static void Main(string[] args)
 		{
-			string publicServerKeyPath;
-			if (args.Length > 0 && File.Exists(args[0].Replace("\"", "")))
-				publicServerKeyPath = args[0].Replace("\"", "");
-			else if (File.Exists("defaultServer.key"))
-				publicServerKeyPath = "defaultServer.key";
-			else
-			{
-				Console.WriteLine("No public key found. Please provide the path to the public key of the server as an argument.");
-				Console.WriteLine("You can set the default public key afterwards with the 'set-default-key' command.");
-				return;
-			}
-			SodtClient client = new SodtClient(publicServerKeyPath);
-			CLI cli = new CLI(client);
+			SodtClient client = new();
+			CLI cli = new(client);
 			//main loop
 			Console.WriteLine("SODTF-CLI initialized. Type 'help' for a list of commands.");
 			Console.WriteLine();
@@ -48,7 +37,6 @@ namespace SODT_CLI
 				{ "c", "connect-default" },
 				{ "lc", "list-clients" },
 				{ "dc", "disconnect" },
-				{"q", "disconnect" },
 				{"exit", "disconnect" },
 				{ "ex", "exchange" },
 				{ "s", "send" },
@@ -71,13 +59,13 @@ namespace SODT_CLI
 				{ "set-session-password", new SetSessionPasswordCommand() },
 				{ "reset-session-password", new ResetSessionPasswordCommand() },
 				{ "send", new SendCommand() },
-				{ "debug", new DebugCommand() },
+				{ "debug", new SetDebugOutputCommand() },
 				{ "list-sends", new ListSendsCommand() },
 				{ "list-receives", new ListReceivesCommand() },
 				{"clear", new ClearCommand() },
-				{ "help", new HelpCommand() },
 				{ "list-aliases", new ListAliasesCommand(aliases)}
 			};
+			commands["help"] = new HelpCommand(commands); // help command needs to be added after all other commands are added to the dictionary so it can list them all
 
 		}
 
@@ -87,7 +75,6 @@ namespace SODT_CLI
 		/// </summary>
 		public void Run()
 		{
-			//TODO: pre set the public key and the default server
 			while (client != null)
 			{
 				//handle commands

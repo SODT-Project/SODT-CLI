@@ -19,12 +19,16 @@ namespace SODT_CLI
 		/// <param name="client">Client on which the command is executed.</param>
 		/// <param name="args">Arguments needed for the command.</param>
 		void Execute(SodtClient client, params string[] args);
+		
+		public string Description { get; }
 	}
 	/// <summary>
 	/// Command to connect to a server.
 	/// </summary>
 	internal class ConnectCommand : ICommand
 	{
+		public virtual string Description => "Connects to a server. Usage: connect <host> <port>";
+		
 		/// <summary>
 		/// Connects to a server.
 		/// This command needs two arguments: <see cref="string"/> host , <see cref="int"/> port
@@ -39,7 +43,16 @@ namespace SODT_CLI
 				SmartConsole.WriteInfo("Already connected!");
 				return;
 			}
-			client.Connect(host, port).Wait(); //not async to block the console
+			
+			// check if public key is available
+			if (!File.Exists("defaultServer.key"))
+			{
+				Console.WriteLine("No public key found. Please set a public key first.");
+				Console.WriteLine("You can set the default public key with the 'set-default-key <path/to/public_key.pem>' command.");
+				return;
+			}
+
+			client.Connect(host, port, File.ReadAllText("defaultServer.key")).Wait(); //not async to block the console
 			while (client.OwnId == 0) Thread.Sleep(20);  //wait for the client to connect
 			SmartConsole.WriteSuccess($"Connected to server! Your Id: {client.OwnId}");
 		}
@@ -55,6 +68,8 @@ namespace SODT_CLI
 	/// </summary>
 	internal class DefaultConnectCommand : ConnectCommand
 	{
+		public override string Description => "Connects to the default server. Usage: connect-default. The default server is specified in the defaultServer.txt file.";
+
 		/// <summary>
 		/// Connects to the default server.
 		/// No arguments needed.
@@ -72,6 +87,8 @@ namespace SODT_CLI
 	/// </summary>
 	internal class ListClientsCommand : ICommand
 	{
+		public string Description => "Lists all connected clients. Usage: list-clients.";
+
 		/// <summary>
 		/// Executes the list clients command.
 		/// No arguments needed.
@@ -95,6 +112,8 @@ namespace SODT_CLI
 	/// </summary>
 	internal class DisconnectCommand : ICommand
 	{
+		public string Description => "Disconnects from the server. Usage: disconnect.";
+
 		/// <summary>
 		/// Executes the disconnect command.
 		/// No arguments needed.
@@ -111,6 +130,8 @@ namespace SODT_CLI
 	/// </summary>
 	internal class ExchangeKeyCommand : ICommand
 	{
+		public string Description => "Exchanges a session key with a client. Usage: exchange <targetId>";
+
 		/// <summary>
 		/// Executes the exchange key command.
 		/// This command needs one argument: <see cref="byte"/> targetId to exchange the key with.
@@ -133,6 +154,8 @@ namespace SODT_CLI
 	/// </summary>
 	internal class SetSessionPasswordCommand : ICommand
 	{
+		public string Description => "Sets the session password for client authentication. Usage: set-session-password <password>";
+
 		public void Execute(SodtClient client, params string[] args)
 		{
 			client.SessionPassword = ValidateArgs(args);
@@ -148,6 +171,8 @@ namespace SODT_CLI
 	/// </summary>
 	internal class ResetSessionPasswordCommand : ICommand
 	{
+		public string Description => "Resets the session password. Usage: reset-session-password";
+
 		public void Execute(SodtClient client, params string[] args)
 		{
 			client.SessionPassword = null;
@@ -158,6 +183,8 @@ namespace SODT_CLI
 	/// </summary>
 	internal class SendCommand : ICommand
 	{
+		public string Description => "Sends a file to a client. Usage: send <targetId> <filePath>";
+
 		/// <summary>
 		/// Executes the send command.
 		/// This command needs two arguments: <see cref="byte"/> targetId , <see cref="string"/> filePath
@@ -167,17 +194,25 @@ namespace SODT_CLI
 		public void Execute(SodtClient client, params string[] args)
 		{
 			(byte targetId, string filePath) = ValidateArgs(args);
+			_ = ExecuteAsync(client, targetId, filePath).ContinueWith(
+				task => SmartConsole.WriteError(task.Exception!.GetBaseException().Message),
+				TaskContinuationOptions.OnlyOnFaulted);
+		}
+
+		private async Task ExecuteAsync(SodtClient client, byte targetId, string filePath)
+		{
 			//check if exchange key is needed
 			if (!client.IsKeyExchanged(targetId))
 			{
 				SmartConsole.WriteInfo($"No session key found for {targetId}.");
-				new ExchangeKeyCommand().Execute(client, args[0]);
-				while (!client.IsKeyExchanged(targetId)) Thread.Sleep(20); //wait for the key exchange to be completed
+				await client.RequestKeyExchange(targetId);
+				SmartConsole.WriteInfo("Waiting for key exchange to complete...");
+				while (!client.IsKeyExchanged(targetId))
+					await Task.Delay(20);
 			}
 			//send the file
-			var request = client.RequestFileTransfer(targetId, filePath);
-			request.Wait();
-			if (!request.Result)
+			bool accepted = await client.RequestFileTransfer(targetId, filePath);
+			if (!accepted)
 				SmartConsole.WriteError($"Transfer request failed. Client {targetId} rejected {Path.GetFileName(filePath)}");
 		}
 		private (byte, string) ValidateArgs(params string[] args)
@@ -196,15 +231,17 @@ namespace SODT_CLI
 
 	}
 	/// <summary>
-	/// Command to do fast debugging.
+	/// Command to set the debug output.
 	/// </summary>
-	internal class DebugCommand : ICommand
+	internal class SetDebugOutputCommand : ICommand
 	{
+		public string Description => "Set if debug output should be shown. Usage: debug <true/false>.";
+
 		public void Execute(SodtClient client, params string[] args)
 		{
-			new DefaultConnectCommand().Execute(client, Array.Empty<string>());
-			new ListClientsCommand().Execute(client, Array.Empty<string>());
-			new ExchangeKeyCommand().Execute(client, [Convert.ToString(client.OwnId)]);
+			if (args.Length != 1) throw new ArgumentException("Invalid number of arguments!");
+			if (!bool.TryParse(args[0], out bool show)) throw new ArgumentException("Invalid argument!");
+			SmartConsole.ShowDebugOutput = show;
 		}
 	}
 	/// <summary>
@@ -212,6 +249,8 @@ namespace SODT_CLI
 	/// </summary>
 	internal abstract class ListCommand : ICommand
 	{
+		public abstract string Description { get; }
+		
 		protected const int progressBarLength = 30;
 		/// <summary>
 		/// Command to list the progress of file transfer tasks.
@@ -284,8 +323,10 @@ namespace SODT_CLI
 	/// <summary>
 	/// Command to list the progress of send file tasks.
 	/// </summary>
-	class ListSendsCommand : ListCommand
+	internal class ListSendsCommand : ListCommand
 	{
+		public override string Description => "Lists the progress of file sends. Usage: list-sends. Press q to exit.";
+
 		protected override int ShowProgressContent(SodtClient client)
 		{
 			int linesWritten = 0;
@@ -307,6 +348,8 @@ namespace SODT_CLI
 	/// </summary>
 	internal class ListReceivesCommand : ListCommand
 	{
+		public override string Description => "Lists the progress of file receives. Usage: list-receives. Press q to exit.";
+
 		protected override int ShowProgressContent(SodtClient client)
 		{
 			int linesWritten = 0;
@@ -328,6 +371,8 @@ namespace SODT_CLI
 	/// </summary>
 	internal class SetDefaultServerCommand : ICommand
 	{
+		public string Description => "Sets the default server. Usage: set-default-server <host> <port>";
+
 		/// <summary>
 		/// Executes the set default server command. Writes the server to the defaultServer.txt file.
 		/// This command needs two arguments: <see cref="string"/> host , <see cref="int"/> port
@@ -350,11 +395,15 @@ namespace SODT_CLI
 	}
 	/// <summary>
 	/// Command to set the default server public key.
-	/// This command needs one argument: <see cref="string"/> filePath.
+	/// This command needs one argument: <see cref="string"/> path to the public key file.
+	/// Path can be a file path or a URI. If the path is a URL, the public key will be downloaded from the URL and saved to the defaultServerPublic.key file.
+	/// The public key must be in PEM format. The command will validate the public key before saving it.
 	/// This command writes the public key to the defaultServerPublic.key file.
 	/// </summary>
 	internal class SetDefaultServerPublicKeyCommand : ICommand
 	{
+		public string Description => "Sets the default server public key. Usage: set-default-key <path/to/public_key.pem>. The public key must be in PEM format. Source can be a file path or a URL.";
+
 		/// <summary>
 		/// Executes the set default server public key command.
 		/// </summary>
@@ -362,22 +411,36 @@ namespace SODT_CLI
 		/// <param name="args">File path to the public key.</param>
 		public void Execute(SodtClient client, params string[] args)
 		{
-			string content = File.ReadAllText(ValidateArgs(args));
+			string content = ValidateArgs(args);
 			File.WriteAllText("defaultServer.key", content);
 		}
+		/// <summary>
+		/// Validates the arguments for the set default server public key command.
+		/// </summary>
+		/// <param name="args"></param>
+		/// <returns>Returns the content of the public key file or the downloaded public key.</returns>
+		/// <exception cref="ArgumentException"></exception>
 		private string ValidateArgs(params string[] args)
 		{
 			if (args.Length != 1) throw new ArgumentException("Invalid number of arguments!");
-			if (!File.Exists(args[0])) throw new ArgumentException("File not found!");
+			string keyPem;
+			if (File.Exists(args[0])) 
+				keyPem = File.ReadAllText(args[0]);
+			else if (args[0].StartsWith("https://") || args[0].StartsWith("http://"))
+			{
+				keyPem = new HttpClient().GetStringAsync(args[0]).Result;
+			}
+			else
+				throw new ArgumentException("Invalid path or URL!");
 			try
 			{
-				RSA.Create().ImportFromPem(File.ReadAllText(args[0]));
+				ECDsa.Create().ImportFromPem(keyPem);
 			}
 			catch
 			{
 				throw new ArgumentException("Invalid public key!");
 			}
-			return args[0];
+			return keyPem;
 		}
 	}
 	/// <summary>
@@ -386,6 +449,8 @@ namespace SODT_CLI
 	/// </summary>
 	internal class ClearCommand : ICommand
 	{
+		public string Description => "Clears the console. Usage: clear";
+		
 		/// <summary>
 		/// Executes the clear command.
 		/// </summary>
@@ -399,6 +464,9 @@ namespace SODT_CLI
 	internal class ListAliasesCommand : ICommand
 	{
 		private readonly Dictionary<string, string> aliases;
+
+		public string Description => "Lists all command aliases. Usage: list-aliases.";
+
 		public ListAliasesCommand(Dictionary<string, string> aliases)
 		{
 			this.aliases = aliases;
@@ -416,6 +484,13 @@ namespace SODT_CLI
 	/// </summary>
 	internal class HelpCommand : ICommand
 	{
+		private readonly Dictionary<string, ICommand> commands;
+		public HelpCommand(Dictionary<string, ICommand> commands)
+		{
+			this.commands = commands;
+		}
+		public string Description => "Displays this help message.";
+		
 		/// <summary>
 		/// Executes the help command.
 		/// </summary>
@@ -423,26 +498,11 @@ namespace SODT_CLI
 		/// <param name="args">No arguments needed.</param>
 		public void Execute(SodtClient client, params string[] args)
 		{
-			Console.WriteLine("Commands (Client-Server):");
-			Console.WriteLine("connect <host> <port> - Connect to a server.");
-			Console.WriteLine("connect-default - Connect to the default server.");
-			Console.WriteLine("list-clients - List all connected clients.");
-			Console.WriteLine("disconnect - Disconnect from the server.");
-			Console.WriteLine();
-			Console.WriteLine("Commands (Client-Client):");
-			Console.WriteLine("set-session-password <password> - Set the session password, used for clients to authenticate themselves to other clients.");
-			Console.WriteLine("reset-session-password - Reset the session password.");
-			Console.WriteLine("exchange <targetId> - Exchange a session key with a client.");
-			Console.WriteLine("send <targetId> <filePath> - Send a file to a client.");
-			Console.WriteLine();
-			Console.WriteLine("Commands (Other):");
-			Console.WriteLine("set-default-server <host> <port> - Set the default server.");
-			Console.WriteLine("set-default-key <sourceFilePath> - Set the default server public key. File must be in PEM format.");
-			Console.WriteLine("clear - Clear the console.");
-			Console.WriteLine("help - Display this message.");
-			Console.WriteLine("list-sends - List the progress of send file tasks.");
-			Console.WriteLine("list-receives - List the progress of receive file tasks.");
-			Console.WriteLine("list-aliases - List all command aliases.");
+			foreach((string command, ICommand value) in commands)
+			{
+				SmartConsole.WriteInfo($"{command}: \t{value.Description}");
+			}
+			SmartConsole.WriteInfo($"help: \t{Description}");
 		}
 	}
 }
