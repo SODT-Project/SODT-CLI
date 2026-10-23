@@ -12,6 +12,7 @@ namespace SODT_CLI
 		/// Object that is used to lock the Console to prevent multiple threads from writing at the same time
 		/// </summary>
 		public static object LockObject { get; } = new();
+		public static bool ShowDebugOutput { get; set; } = false;
 		private static bool yesNoQuestionActive = false;
 		private static TaskCompletionSource<bool> yesNoTask = new();
 		/// <summary>
@@ -127,7 +128,9 @@ namespace SODT_CLI
 		
 		public static void WriteDebug(string text)
 		{
-			RequestWriteLine("DEBUG: " + text, ConsoleColor.Gray);
+			if (ShowDebugOutput)
+				RequestWriteLine("DEBUG: " + text, ConsoleColor.Gray);
+
 		}
 	}
 }

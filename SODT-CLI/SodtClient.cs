@@ -71,7 +71,7 @@ namespace SODT_CLI
 		/// <summary>
 		/// The certificate of the server to validate its authenticity during the session
 		/// </summary>
-		private readonly ECDsa ecdsaServerCertificate;
+		private ECDsa? ecdsaServerCertificate;
 		
 		/// <summary>
 		/// Contains all clients that are connected to the server.
@@ -144,17 +144,11 @@ namespace SODT_CLI
 				return copy;
 			}
 		}
-
-		public SodtClient(string ecdsaServerCertificatePath)
-		{
-            ecdsaServerCertificate = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-			ecdsaServerCertificate.ImportFromPem(File.ReadAllText(ecdsaServerCertificatePath));
-		}
 		
 		/// <summary>
 		/// Sends a message to the server or a client and encrypts it with the server public key or the client aes key.
 		/// </summary>
-		/// <param name="targetId">Destination id for this package. Set to 0 to adress the message to the server.</param>
+		/// <param name="targetId">Destination id for this package. Set to 0 to address the message to the server.</param>
 		/// <param name="baseMessage">Message to be sent.</param>
 		/// <returns></returns>
 		/// <exception cref="InvalidOperationException"></exception>
@@ -168,9 +162,9 @@ namespace SODT_CLI
 				{
 					if (!aesSessionKeys.TryGetValue(targetId, out AesGcm? aes))
 					{
-						//This case should never happen because the CLI always checks and requests, if neccessary, a key exchange before sending a message.
+						//This case should never happen because the CLI always checks and requests, if necessary, a key exchange before sending a message.
 						SmartConsole.WriteError($"No key for target client {targetId} to encrypt with. How do you even get here?");
-						throw new InvalidOperationException("No key for target client to encrypt with.");
+						throw new InvalidOperationException("No key for target client to encrypt with."); // TODO remove this or handle better because of new sructure it will happen more often.
 					}
 					
 					EncryptionHandler.EncryptAesGcm(aes, baseMessage, finalMessage);
@@ -205,8 +199,12 @@ namespace SODT_CLI
 		/// </summary>
 		/// <param name="host">The host of the server.</param>
 		/// <param name="port">The port of the server.</param>
-		public async Task Connect(string host, int port)
+		/// <param name="ecdsaServerCertificatePem">The ECDSA server certificate in PEM format.</param>
+		public async Task Connect(string host, int port, string ecdsaServerCertificatePem)
 		{
+			ecdsaServerCertificate = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+			ecdsaServerCertificate.ImportFromPem(ecdsaServerCertificatePem);
+			
 			await client.ConnectAsync(host, port);
 			_ = Receive(); // fire and forget. Receive will handle itself
 			
@@ -621,7 +619,7 @@ namespace SODT_CLI
 					await stream.FlushAsync();
 					if (!VerifyFileIntegrity(stream, incomingFileStreamMetaData[uuid].FileHash))
 					{
-						SmartConsole.WriteWarning($"The received File {fileName} does not match with the sent verification hash. The file's integretiy might be broken!");
+						SmartConsole.WriteWarning($"The received File {fileName} does not match with the sent verification hash. The file's integrity might be broken!");
 					}
 					stream.Close();
 					await SendAcknowledgement(incomingFileStreamMetaData[uuid], remoteId);
