@@ -9,4 +9,8 @@
         <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
     </PropertyGroup>
 
+    <ItemGroup>
+        <Compile Remove="SODT-CLI.Tests/**/*.cs"/>
+    </ItemGroup>
+
 </Project>
