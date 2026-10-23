@@ -177,16 +177,42 @@ namespace SODT_CLI.Tests
 			// test if server can handle max number of clients (253) without crashing or throwing exceptions
 			var clientList = new List<SodtClient>();
 			var connectTasks = new List<Task>();
-			for (byte i = 2; i < 10; i++)
+			for (byte i = 2; i <= 253; i++)
 			{
 				clientList.Add(CreateClient());
 				connectTasks.Add(clientList.Last().Connect(ServerIp, ServerPort));
-				await Task.Delay(10); // small delay to avoid overwhelming the server
+				await Task.Delay(50); // small delay to avoid overwhelming the server
 			}
 			await Task.WhenAll(connectTasks);
 			await Task.Delay(1000); // wait for 1 second to let the server respond
 			// assert that all clients are connected and have a valid id
 			Assert.All(clientList, client => Assert.NotEqual((byte)0, client.OwnId));
+			
+			// disconnect all clients
+			var disconnectTasks = clientList.Select(client => client.DisconnectFromServer()).ToList();
+			await Task.WhenAll(disconnectTasks);
+		}
+		
+		[Fact]
+		public async Task FloodServerWithTooMuchClients()
+		{
+			// test if server can handle >max number of clients (253) without crashing or throwing exceptions
+			var clientList = new List<SodtClient>();
+			var connectTasks = new List<Task>();
+			for (byte i = 2; i <= 254; i++)
+			{
+				clientList.Add(CreateClient());
+				connectTasks.Add(clientList.Last().Connect(ServerIp, ServerPort));
+				await Task.Delay(50); // small delay to avoid overwhelming the server
+			}
+			await Task.WhenAll(connectTasks);
+			await Task.Delay(1000); // wait for 1 second to let the server respond
+			// exaclty one client should not be able to connect and have a valid id
+			Assert.Equal(1, clientList.Count(client => client.OwnId == 0));
+			
+			// disconnect all clients
+			var disconnectTasks = clientList.Select(client => client.DisconnectFromServer()).ToList();
+			await Task.WhenAll(disconnectTasks);
 		}
 
 		private static SodtClient CreateClient()
