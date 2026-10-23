@@ -412,9 +412,17 @@ namespace SODT_CLI
 			switch ((PacketCode)exchange.Code)
 			{
 				case PacketCode.Request: // PaketCode.Request is received when the target client requests a key exchange
-					SmartConsole.WriteInfo($"Client {remoteId} requested key exchange."); //TODO: Ask user for permission
-					ecdhSessionKeyGenerators[remoteId] = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-					aesSessionKeys[remoteId] = EncryptionHandler.GenerateSessionKey(ecdhSessionKeyGenerators[remoteId], exchange.Key);
+					bool permission = await SmartConsole.AskYesNo($"Client {remoteId} requests a key exchange. Do you want to accept the key exchange?");
+					if (!permission)
+					{
+						await SendUnencrypted(remoteId, KeyExchange.CreateDenied(exchange));
+						return;
+					}
+					lock (cryptoLock)
+					{
+						ecdhSessionKeyGenerators[remoteId] = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+						aesSessionKeys[remoteId] = EncryptionHandler.GenerateSessionKey(ecdhSessionKeyGenerators[remoteId], exchange.Key);
+					}
 					//send ok
 					SmartConsole.WriteInfo($"Key exchange with {remoteId} accepted.");
 					KeyExchange exchangeAccepted = KeyExchange.CreateResponse(ecdhSessionKeyGenerators[remoteId].ExportSubjectPublicKeyInfo(), ecdsaSessionCertificate.ExportSubjectPublicKeyInfo(), publicSessionPasswordHash);
