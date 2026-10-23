@@ -1,5 +1,4 @@
-﻿using System.Security.Cryptography;
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -8,22 +7,27 @@ namespace SODT_Common
 	public enum PacketCode
 	{
 		/// <summary>
-		/// Request packet code, typically sent by clients to initiate a connection or request data transfer.
+		/// Generic request packet code, typically sent by clients to initiate a connection or request data transfer.
 		/// </summary>
 		Request = 100,
 
 		/// <summary>
-		/// OK packet code, indicating a successful response from the server or the completion of an operation.
+		/// Generic OK packet code, indicating a successful response from the server or the completion of an operation.
 		/// </summary>
 		Ok = 200,
 
 		/// <summary>
-		/// Denied packet code, indicating that a request cannot be fulfilled due to errors or restrictions.
+		/// Acknowledgement packet code, used to confirm the receipt of a file during a file transfer operation.
+		/// </summary>
+		Ack = 250,
+
+		/// <summary>
+		/// Generic denied packet code, indicating that a request cannot be fulfilled due to errors or restrictions.
 		/// </summary>
 		Denied = 300,
 
 		/// <summary>
-		/// Error packet code, used to report any issues encountered during the execution of an operation.
+		/// Generic error packet code, used to report any issues encountered during the execution of an operation.
 		/// </summary>
 		Error = 400
 	}
@@ -44,6 +48,12 @@ namespace SODT_Common
 		public const int HeaderSizeWithoutContentLengthSize = HeaderSize - ContentLengthSize;
 		
 		/// <summary>
+		/// Maximum size of the file buffer. This is the maximum size of file data that can be sent at once.
+		/// </summary>
+		// 1088 bytes are reserved for the json overhead of the file data message. This a worst case scenario. The actual overhead is usually smaller
+		public const int FileBufferSize = FullMessageSize - HeaderSize - 1088;
+		
+		/// <summary>
 		/// The total size of the message content plus 2 bytes that define the inner content size.
 		/// </summary>
 		public const int MessageWithHeaders = FullMessageSize - IdSize;
@@ -56,7 +66,7 @@ namespace SODT_Common
 		public const int MessageContentSize = FullMessageSize - HeaderSize;
 		
 		public const int MessageWithContentSize = MessageContentSize + ContentLengthSize;
-		public static byte[] ToBytes(IBaseMessage baseMessage)
+		public static byte[] ToBytes(IBaseMessage baseMessage) // TODO optimize
 		{
 			//get content 
 			byte[] content = Encoding.UTF8.GetBytes(baseMessage.ToJson());
@@ -64,7 +74,7 @@ namespace SODT_Common
 			//check if content is too large																  
 			if (content.Length > MessageContentSize)
 			{
-				throw new ArgumentException("Message size is too large");
+				throw new ArgumentException($"Message size is too large: {content.Length} bytes is greater than the maximum allowed size of {MessageContentSize} bytes.");
 			}
 			//create byte array
 			byte[] contentLength = BitConverter.GetBytes((ushort)content.Length); //contentLength is always 2 bytes because it's convertet to ushort
@@ -86,19 +96,19 @@ namespace SODT_Common
 		/// Gets or sets the unique identifier for this message, used to distinguish it from others.
 		/// </summary>
 		[JsonPropertyName("uuid")]
-		public int Uuid { get; set; }
+		public int Uuid { get; init; }
 
 		/// <summary>
 		/// Gets or sets the code of the message, representing its type and purpose.
 		/// </summary>
 		[JsonPropertyName("code")]
-		public int Code { get; set; }
+		public int Code { get; init; }
 
 		/// <summary>
 		/// Gets or sets the type of the message, used to categorize it according to its functionality.
 		/// </summary>
 		[JsonPropertyName("type")]
-		public string Type { get; set; }
+		public string Type { get; init; }
 
 		/// <summary>
 		/// Converts the message to a JSON string.
@@ -116,16 +126,16 @@ namespace SODT_Common
 	/// Represents a base message in the system. This struct provides the basic properties that all messages
 	/// inherit and use to communicate with other components in the system. It is a direct implementation of IBaseMessage.
 	/// </summary>
-	public struct BaseMessage : IBaseMessage
+	public readonly struct BaseMessage : IBaseMessage
 	{
 		[JsonPropertyName("uuid")]
-		public int Uuid { get; set; }
+		public int Uuid { get; init; }
 
 		[JsonPropertyName("code")]
-		public int Code { get; set; }
+		public int Code { get; init; }
 
 		[JsonPropertyName("type")]
-		public string Type { get; set; }
+		public string Type { get; init; }
 
 		//default BaseMessage constructor should not be overriden to avoid parsing errors
 
@@ -138,25 +148,25 @@ namespace SODT_Common
 			return MessageHelper.ToBytes(this);
 		}
 	}
-	public struct Discovery : IBaseMessage
+	public readonly struct Discovery : IBaseMessage
 	{
 		[JsonPropertyName("uuid")]
-		public int Uuid { get; set; }
+		public int Uuid { get; init; }
 
 		[JsonPropertyName("code")]
-		public int Code { get; set; }
+		public int Code { get; init; }
 
 		[JsonPropertyName("type")]
-		public string Type { get; set; }
+		public string Type { get; init; }
 
 		[JsonPropertyName("id")]
-		public byte Id { get; set; }
+		public byte Id { get; init; }
 		
 		[JsonPropertyName("publicKey")]
-		public byte[] PublicKey { get; set; }
+		public byte[] PublicKey { get; init; }
 
 		[JsonPropertyName("signature")]
-		public byte[]? Signature { get; set; }
+		public byte[]? Signature { get; init; }
 
 		private Discovery(PacketCode code, byte assignedId, byte[] publicKey, byte[]? signature)
 		{
@@ -188,49 +198,93 @@ namespace SODT_Common
 		}
 		
 	}
+	
+	/// <summary>
+	/// Represents a ping-pong message in the system. This struct is used to check the connectivity between clients and servers.
+	/// </summary>
+	public readonly struct PingPong : IBaseMessage
+	{
+		[JsonPropertyName("uuid")]
+		public int Uuid { get; init; }
+
+		[JsonPropertyName("code")]
+		public int Code { get; init; }
+
+		[JsonPropertyName("type")]
+		public string Type { get; init; }
+
+		private PingPong(PacketCode code)
+		{
+			Uuid = new Random().Next();
+			Code = (int)code;
+			Type = "pingpong";
+		}
+		
+		public static PingPong CreateRequest()
+		{
+			return new PingPong(PacketCode.Request);
+		}
+		
+		public static PingPong CreateResponse()
+		{
+			return new PingPong(PacketCode.Ok);
+		}
+
+		public string ToJson()
+		{
+			return JsonSerializer.Serialize(this);
+		}
+		
+		public byte[] ToBytes()
+		{
+			return MessageHelper.ToBytes(this);
+		}
+		
+	}
+	
 	/// <summary>
 	/// Represents a key exchange message in the system. This class inherits from BaseMessage and provides 
 	/// additional properties relevant to key exchange operations.
 	/// </summary>
 	/// <remarks>This class is designed for use in scenarios where clients need to establish secure connections.</remarks>
-	public struct KeyExchange : IBaseMessage
+	public readonly struct KeyExchange : IBaseMessage
 	{
 		/// <summary>
 		/// Gets or sets the unique identifier for this message, used to distinguish it from others.
 		/// </summary>
 		[JsonPropertyName("uuid")]
-		public int Uuid { get; set; }
+		public int Uuid { get; init; }
 
 		/// <summary>
 		/// Gets or sets the code of the message, representing its type and purpose.
 		/// </summary>
 		[JsonPropertyName("code")]
-		public int Code { get; set; }
+		public int Code { get; init; }
 
 		/// <summary>
 		/// Gets or sets the type of the message, used to categorize it according to its functionality.
 		/// </summary>
 		[JsonPropertyName("type")]
-		public string Type { get; set; }
+		public string Type { get; init; }
 
 
 		/// <summary>
 		/// Gets or sets the shared secret key used for encryption.
 		/// </summary>
 		[JsonPropertyName("key")]
-		public byte[] Key { get; set; }
+		public byte[] Key { get; init; }
 
 		/// <summary>
 		/// Gets or sets the session hash used to verify the integrity of the key exchange.
 		/// </summary>
 		[JsonPropertyName("sessionHash")]
-		public byte[]? SessionHash { get; set; }
+		public byte[]? SessionHash { get; init; }
 		
 		/// <summary>
 		/// Gets or sets the certificate of the client.
 		/// </summary>
 		[JsonPropertyName("certificate")]
-		public byte[] Certificate { get; set; }
+		public byte[] Certificate { get; init; }
 		
 		
 
@@ -250,16 +304,46 @@ namespace SODT_Common
 			SessionHash = sessionHash;
 			Certificate = certificate;
 		}
-
-		public static KeyExchange Create(PacketCode code, byte[] key, byte[] certificate, byte[]? sessionHash)
+		private KeyExchange(int uuid, PacketCode code, byte[] key, byte[] certificate, byte[]? sessionHash)
 		{
-			return new KeyExchange(code, key, certificate, sessionHash);
+			Uuid = uuid;
+			Code = (int)code;
+			Type = "exchange";
+			Key = key;
+			SessionHash = sessionHash;
+			Certificate = certificate;
 		}
+		public static KeyExchange CreateRequest(byte[] key, byte[] certificate, byte[]? sessionHash)
+		{
+			return new KeyExchange(PacketCode.Request, key, certificate, sessionHash);
+		}
+		public static KeyExchange CreateResponse(byte[] key, byte[] certificate, byte[]? sessionHash)
+		{
+			return new KeyExchange(PacketCode.Ok, key, certificate, sessionHash);
+		}
+		
 		public static KeyExchange CreateError(KeyExchange keyExchange)
 		{
-			keyExchange.Code = (int)PacketCode.Error;
-			return keyExchange;
+			return new KeyExchange(
+				keyExchange.Uuid,
+				PacketCode.Error,
+				keyExchange.Key,
+				keyExchange.Certificate,
+				keyExchange.SessionHash
+			);
 		}
+		
+		public static KeyExchange CreateDenied(KeyExchange keyExchange)
+		{
+			return new KeyExchange(
+				keyExchange.Uuid,
+				PacketCode.Denied,
+				keyExchange.Key,
+				keyExchange.Certificate,
+				keyExchange.SessionHash
+			);
+		}
+		
 		public string ToJson()
 		{
 			return JsonSerializer.Serialize(this);
@@ -274,25 +358,25 @@ namespace SODT_Common
 	/// Represents a disconnect message in the system. This class inherits from BaseMessage and provides
 	/// additional properties relevant to disconnection operations.
 	/// </summary>
-	public struct Disconnect : IBaseMessage
+	public readonly struct Disconnect : IBaseMessage
 	{
 		/// <summary>
 		/// Gets or sets the unique identifier for this message, used to distinguish it from others.
 		/// </summary>
 		[JsonPropertyName("uuid")]
-		public int Uuid { get; set; }
+		public int Uuid { get; init; }
 
 		/// <summary>
 		/// Gets or sets the code of the message, representing its type and purpose.
 		/// </summary>
 		[JsonPropertyName("code")]
-		public int Code { get; set; }
+		public int Code { get; init; }
 
 		/// <summary>
 		/// Gets or sets the type of the message, used to categorize it according to its functionality.
 		/// </summary>
 		[JsonPropertyName("type")]
-		public string Type { get; set; }
+		public string Type { get; init; }
 
 		/// <summary>
 		/// Generate a new disconnect message a new UUID and type of "disconnect".
@@ -323,19 +407,19 @@ namespace SODT_Common
 	/// Represents a client list message in the system. This class inherits from BaseMessage and provides
 	/// additional properties relevant to client list operations.
 	/// </summary>
-	public struct ClientList : IBaseMessage
+	public readonly struct ClientList : IBaseMessage
 	{
 		[JsonPropertyName("uuid")]
-		public int Uuid { get; set; }
+		public int Uuid { get; init; }
 
 		[JsonPropertyName("code")]
-		public int Code { get; set; }
+		public int Code { get; init; }
 
 		[JsonPropertyName("type")]
-		public string Type { get; set; }
+		public string Type { get; init; }
 
 		[JsonPropertyName("clients")]
-		public byte[]? Clients { get; set; }
+		public byte[]? Clients { get; init; }
 
 
 
@@ -375,46 +459,87 @@ namespace SODT_Common
 		}
 	}
 
-	public struct Transfer : IBaseMessage
+	public readonly struct Transfer : IBaseMessage
 	{
 		[JsonPropertyName("uuid")]
-		public int Uuid { get; set; }
+		public int Uuid { get; init; }
 
 		[JsonPropertyName("code")]
-		public int Code { get; set; }
+		public int Code { get; init; }
 
 		[JsonPropertyName("type")]
-		public string Type { get; set; }
+		public string Type { get; init; }
 
 		[JsonPropertyName("filename")]
-		public string FileName { get; set; }
+		public string FileName { get; init; }
 
 		[JsonPropertyName("filesize")]
-		public long FileSize { get; set; }
+		public long FileSize { get; init; }
 
-		[JsonPropertyName("sourceId")]
-		public byte SourceId { get; set; }
+		[JsonPropertyName("filehash")]
+		public byte[] FileHash { get; init; }
 
-		private Transfer(PacketCode code, string fileName, long fileSize, byte sourceId)
+		private Transfer(PacketCode code, string fileName, long fileSize, byte[] fileHash) :
+			this(new Random().Next(), code, fileName, fileSize, fileHash)
+		{ }
+		private Transfer(int uuid, PacketCode code, string fileName, long fileSize, byte[] fileHash)
 		{
-			Uuid = new Random().Next();
+			Uuid = uuid;
 			Code = (int)code;
 			Type = "transfer";
 			FileName = fileName;
 			FileSize = fileSize;
-			SourceId = sourceId;
+			FileHash = fileHash;
 		}
-		public static Transfer CreateRequest(string fileName, long fileSize, byte sourceId)
+		public static Transfer CreateRequest(string fileName, long fileSize, byte[] fileHash)
 		{
-			return new Transfer(PacketCode.Request, fileName, fileSize, sourceId);
+			return new Transfer(PacketCode.Request, fileName, fileSize, fileHash);
 		}
-		public static Transfer CreateRespone(Transfer request, byte sourceId)
+		public static Transfer CreateResponse(Transfer request)
 		{
-			//do not use new Transfer(...) to keep the same UUID
-			Transfer response = request;
-			response.Code = (int)PacketCode.Ok;
-			response.SourceId = sourceId;
-			return response;
+			// keep the same UUID
+			return new Transfer(
+				request.Uuid,
+				PacketCode.Ok,
+				request.FileName,
+				request.FileSize,
+				request.FileHash
+			);
+		}
+		public static Transfer CreateAcknowledgement(Transfer request)
+		{
+			// keep the same UUID
+			return new Transfer(
+				request.Uuid,
+				PacketCode.Ack,
+				request.FileName,
+				request.FileSize,
+				request.FileHash
+			);
+        }
+		
+		public static Transfer CreateError(Transfer request)
+		{
+			// keep the same UUID
+			return new Transfer(
+				request.Uuid,
+				PacketCode.Error,
+				request.FileName,
+				request.FileSize,
+				request.FileHash
+			);
+		}
+		
+		public static Transfer CreateDenied(Transfer request)
+		{
+			// keep the same UUID
+			return new Transfer(
+				request.Uuid,
+				PacketCode.Denied,
+				request.FileName,
+				request.FileSize,
+				request.FileHash
+			);
 		}
 
 		public string ToJson()
@@ -427,22 +552,22 @@ namespace SODT_Common
 		}
 	}
 
-	public struct TransferData : IBaseMessage
+	public readonly struct TransferData : IBaseMessage
 	{
 		[JsonPropertyName("uuid")]
-		public int Uuid { get; set; }
+		public int Uuid { get; init; }
 
 		[JsonPropertyName("code")]
-		public int Code { get; set; }
+		public int Code { get; init; }
 
 		[JsonPropertyName("type")]
-		public string Type { get; set; }
+		public string Type { get; init; }
 
 		[JsonPropertyName("data")]
-		public ReadOnlyMemory<byte> Data { get; set; }
+		public ReadOnlyMemory<byte> Data { get; init; }
 
 		[JsonPropertyName("position")]
-		public long Position { get; set; }
+		public long Position { get; init; }
 
 		private TransferData(int uuid, PacketCode code, ReadOnlyMemory<byte> data, long position)
 		{

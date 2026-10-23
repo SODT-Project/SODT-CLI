@@ -83,41 +83,6 @@ namespace SODT_CLI
 
 
 		/// <summary>
-		/// Reads a line from the console and splits it.
-		/// File paths are kept together if they are in quotes.
-		/// </summary>
-		/// <param name="message"></param>
-		/// <returns>Command like structure. [0] is the keyword, [1] is the first argument, [2] is the second argument, ...</returns>
-		private static string[] GetInput(string message)
-		{
-			Console.Write(message);
-			string input = Console.ReadLine() ?? "";
-
-			//split input but keep file paths together
-			List<string> parts = new();
-			bool isPath = false;
-			string current = "";
-			foreach (char c in input)
-			{
-				if (c == ' ' && !isPath)
-				{
-					parts.Add(current);
-					current = "";
-				}
-				else if (c == '"')
-				{
-					isPath = !isPath;
-				}
-				else
-				{
-					current += c;
-				}
-			}
-			if (!string.IsNullOrEmpty(current))
-				parts.Add(current);
-			return parts.ToArray();
-		}
-		/// <summary>
 		/// Starts the CLI and listens for commands.
 		/// </summary>
 		public void Run()
@@ -126,7 +91,7 @@ namespace SODT_CLI
 			while (client != null)
 			{
 				//handle commands
-				string[] keyword = GetInput("");
+				string[] keyword = SmartConsole.GetInput("");
 				if (keyword.Length == 0) continue;
 				if (aliases.TryGetValue(keyword[0], out string? fullName))
 				{
