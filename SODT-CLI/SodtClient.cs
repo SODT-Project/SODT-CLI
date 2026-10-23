@@ -215,6 +215,7 @@ namespace SODT_CLI
 			byte[] ecdhPublicKey = ecdhSessionKeyGenerators[ServerId].ExportSubjectPublicKeyInfo();
 			Discovery discovery = Discovery.CreateRequest(ecdhPublicKey);
 			await SendUnencrypted(ServerId, discovery);
+			_ = SendPingPeriodically(); // fire and forget. SendPingPeriodically will handle itself
 		}
 
 		/// <summary>
@@ -270,11 +271,6 @@ namespace SODT_CLI
 				await DisconnectFromServer();
 			}
 		}
-		private async Task HandlePingPong()
-		{
-			//SmartConsole.WriteDebug("Received ping from server. Sending pong.");
-			await SendEncrypted(ServerId, PingPong.CreateResponse());
-		}
 		
 		/// <summary>
 		/// Decrypts the received message from the server or a client.
@@ -322,8 +318,7 @@ namespace SODT_CLI
 					await HandleDiscovery(discovery);
 					break;
 				case PingPong:
-					await HandlePingPong();
-					break;
+					break; // PingPong is only used to check if the connection is still alive. No action needed.
 				case ClientList clients:
 					UpdateClientList(clients);
 					break;
@@ -339,6 +334,16 @@ namespace SODT_CLI
 				default:
 					SmartConsole.WriteError("Received Message contains one or more errors. Ignoring message.");
 					break;
+			}
+		}
+		
+		private async Task SendPingPeriodically()
+		{
+			while (client.Connected)
+			{
+				await Task.Delay(5000);
+				await SendEncrypted(ServerId, PingPong.CreateRequest());
+				SmartConsole.WriteDebug("Sent Ping to server.");
 			}
 		}
 
