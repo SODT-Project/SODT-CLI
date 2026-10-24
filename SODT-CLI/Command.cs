@@ -186,6 +186,7 @@ namespace SODT_CLI
 					await Task.Delay(20);
 			}
 			//send the file
+			SmartConsole.WriteInfo($"Requesting file transfer to {targetId} for {Path.GetFileName(filePath)}...");
 			bool accepted = await client.RequestFileTransfer(targetId, filePath);
 			if (!accepted)
 				SmartConsole.WriteError($"Transfer request failed. Client {targetId} rejected {Path.GetFileName(filePath)}");
