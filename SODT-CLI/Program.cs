@@ -75,7 +75,7 @@ namespace SODT_CLI
 		/// </summary>
 		public void Run()
 		{
-			while (client != null)
+			while (!client.Disconnected)
 			{
 				//handle commands
 				string[] keyword = SmartConsole.GetInput("");

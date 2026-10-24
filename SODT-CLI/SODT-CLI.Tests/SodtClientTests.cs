@@ -15,7 +15,7 @@ namespace SODT_CLI.Tests
 		{
 			SodtClient client = CreateClient();
 
-			await client.Connect(ServerIp, ServerPort);
+			await client.Connect(ServerIp, ServerPort,await File.ReadAllTextAsync(ServerCertificatePath));
 			await Task.Delay(1000); // wait for 1 second to let the server respond
 			Assert.NotEqual((byte)0, client.OwnId);
 			Assert.True(client.IsKeyExchanged(1));
@@ -27,7 +27,7 @@ namespace SODT_CLI.Tests
 		public async Task RequestClientList_UpdatesConnectedClients()
 		{
 			SodtClient client = CreateClient();
-			await client.Connect(ServerIp, ServerPort);
+			await client.Connect(ServerIp, ServerPort,await File.ReadAllTextAsync(ServerCertificatePath));
 			await Task.Delay(1000); // wait for 1 second to let the server respond
 			await client.RequestClientList();
 
@@ -39,7 +39,7 @@ namespace SODT_CLI.Tests
         public async Task RequestKeyExchange_SendsRequestToServer()
 		{
 			SodtClient client = CreateClient();
-			await client.Connect(ServerIp, ServerPort);
+			await client.Connect(ServerIp, ServerPort,await File.ReadAllTextAsync(ServerCertificatePath));
 
 			await client.RequestKeyExchange(2);
 
@@ -60,7 +60,7 @@ namespace SODT_CLI.Tests
         public async Task DisconnectFromServer_ClearsClientState()
 		{
 			SodtClient client = CreateClient();
-			await client.Connect(ServerIp, ServerPort);
+			await client.Connect(ServerIp, ServerPort,await File.ReadAllTextAsync(ServerCertificatePath));
 
 			await client.DisconnectFromServer();
 
@@ -135,8 +135,8 @@ namespace SODT_CLI.Tests
 			SodtClient firstClient = CreateClient();
 			SodtClient secondClient = CreateClient();
 			await Task.WhenAll(
-				firstClient.Connect(ServerIp, ServerPort),
-				secondClient.Connect(ServerIp, ServerPort));
+				firstClient.Connect(ServerIp, ServerPort, await File.ReadAllTextAsync(ServerCertificatePath)),
+				secondClient.Connect(ServerIp, ServerPort, await File.ReadAllTextAsync(ServerCertificatePath)));
 			await WaitUntilAsync(() => firstClient.OwnId != 0 && secondClient.OwnId != 0);
 			await Task.Delay(1000);
 			return (firstClient, secondClient);
@@ -180,7 +180,7 @@ namespace SODT_CLI.Tests
 			for (byte i = 2; i <= 253; i++)
 			{
 				clientList.Add(CreateClient());
-				connectTasks.Add(clientList.Last().Connect(ServerIp, ServerPort));
+				connectTasks.Add(clientList.Last().Connect(ServerIp, ServerPort, await File.ReadAllTextAsync(ServerCertificatePath)));
 				await Task.Delay(50); // small delay to avoid overwhelming the server
 			}
 			await Task.WhenAll(connectTasks);
@@ -202,7 +202,7 @@ namespace SODT_CLI.Tests
 			for (byte i = 2; i <= 254; i++)
 			{
 				clientList.Add(CreateClient());
-				connectTasks.Add(clientList.Last().Connect(ServerIp, ServerPort));
+				connectTasks.Add(clientList.Last().Connect(ServerIp, ServerPort, await File.ReadAllTextAsync(ServerCertificatePath)));
 				await Task.Delay(50); // small delay to avoid overwhelming the server
 			}
 			await Task.WhenAll(connectTasks);
@@ -217,7 +217,7 @@ namespace SODT_CLI.Tests
 
 		private static SodtClient CreateClient()
 		{
-			return new SodtClient(ServerCertificatePath);
+			return new SodtClient();
 		}
 	}
 }

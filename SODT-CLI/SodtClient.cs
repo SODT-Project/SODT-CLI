@@ -46,6 +46,8 @@ namespace SODT_CLI
 				}
 			}
 		}
+
+		public bool Disconnected { get; private set; } = false;
 		
 		/// <summary>
 		/// Contains the ids of all clients that are connected to the server.
@@ -202,6 +204,7 @@ namespace SODT_CLI
 		/// <param name="ecdsaServerCertificatePem">The ECDSA server certificate in PEM format.</param>
 		public async Task Connect(string host, int port, string ecdsaServerCertificatePem)
 		{
+
 			ecdsaServerCertificate = ECDsa.Create(ECCurve.NamedCurves.nistP256);
 			ecdsaServerCertificate.ImportFromPem(ecdsaServerCertificatePem);
 			
@@ -225,7 +228,8 @@ namespace SODT_CLI
 		{
 			try
 			{
-				await SendEncrypted(ServerId, Disconnect.CreateRequest());
+				if (aesSessionKeys.TryGetValue(ServerId, out _))
+					await SendEncrypted(ServerId, Disconnect.CreateRequest());
 			}
 			catch { /*Ignore. Announcing Disconnect is optional anyway.*/ }
 			OwnId = 0;
@@ -234,6 +238,7 @@ namespace SODT_CLI
 			ecdsaSessionCertificate.Dispose();
 			SessionPassword = null;
 			client.Close();
+			Disconnected = true;
 		}
 
 		/// <summary>
@@ -258,6 +263,10 @@ namespace SODT_CLI
 
 					await HandleReceivedBuffer(buffer, buffer[1]);
 				}
+			}
+			catch (IOException)
+			{
+				// The server has closed the connection. This is expected behavior when the server disconnects the client.
 			}
 			catch (Exception e)
 			{
@@ -339,7 +348,9 @@ namespace SODT_CLI
 		{
 			while (client.Connected)
 			{
-				await Task.Delay(5000);
+				await Task.Delay(3000);
+				if (!aesSessionKeys.TryGetValue(ServerId, out _))
+					continue;
 				await SendEncrypted(ServerId, PingPong.CreateRequest());
 				SmartConsole.WriteDebug("Sent Ping to server.");
 			}

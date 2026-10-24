@@ -52,9 +52,18 @@ namespace SODT_CLI
 				return;
 			}
 
-			client.Connect(host, port, File.ReadAllText("defaultServer.key")).Wait(); //not async to block the console
-			while (client.OwnId == 0) Thread.Sleep(20);  //wait for the client to connect
-			SmartConsole.WriteSuccess($"Connected to server! Your Id: {client.OwnId}");
+			var connectTask = client.Connect(host, port, File.ReadAllText("defaultServer.key"));
+			for (int i = 0; i < 100; i++)
+			{
+				if (client.OwnId != 0)
+				{
+					SmartConsole.WriteSuccess($"Connected to server! Your Id: {client.OwnId}");
+					return;
+				}
+				Thread.Sleep(20);
+			}
+			connectTask.Dispose();
+			SmartConsole.WriteError("Connection failed!");
 		}
 		private (string host, int port) ValidateArgs(params string[] args)
 		{
