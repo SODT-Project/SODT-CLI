@@ -1,11 +1,4 @@
-﻿using System.Text.Json.Serialization;
-using System.IO;
-using System;
-using System.Runtime.InteropServices;
-using System.Diagnostics.Metrics;
-using System.Collections.ObjectModel;
-
-namespace SODT_CLI
+﻿namespace SODT_CLI
 {
 	internal class Program
 	{
@@ -56,8 +49,6 @@ namespace SODT_CLI
 				{ "list-clients", new ListClientsCommand() },
 				{ "disconnect", new DisconnectCommand() },
 				{ "exchange", new ExchangeKeyCommand() },
-				{ "set-session-password", new SetSessionPasswordCommand() },
-				{ "reset-session-password", new ResetSessionPasswordCommand() },
 				{ "send", new SendCommand() },
 				{ "debug", new SetDebugOutputCommand() },
 				{ "list-sends", new ListSendsCommand() },

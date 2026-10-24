@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net;
-using System.Security.Cryptography;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.Security.Cryptography;
 
 namespace SODT_CLI
 {
@@ -158,35 +152,7 @@ namespace SODT_CLI
 			return id;
 		}
 	}
-	/// <summary>
-	/// Command to set the session password, used for clients to authenticate themselves to other clients.
-	/// </summary>
-	internal class SetSessionPasswordCommand : ICommand
-	{
-		public string Description => "Sets the session password for client authentication. Usage: set-session-password <password>";
-
-		public void Execute(SodtClient client, params string[] args)
-		{
-			client.SessionPassword = ValidateArgs(args);
-		}
-		private string ValidateArgs(params string[] args)
-		{
-			if (args.Length != 1) throw new ArgumentException("Invalid number of arguments!");
-			return args[0];
-		}
-	}
-	/// <summary>
-	/// Command to reset the session password, used for clients to authenticate themselves to other clients.
-	/// </summary>
-	internal class ResetSessionPasswordCommand : ICommand
-	{
-		public string Description => "Resets the session password. Usage: reset-session-password";
-
-		public void Execute(SodtClient client, params string[] args)
-		{
-			client.SessionPassword = null;
-		}
-	}
+	
 	/// <summary>
 	/// Sends a file to a specified client.
 	/// </summary>

@@ -137,30 +137,7 @@ namespace SODT_CLI.Tests
 
 			Assert.Equal(expectedPhrase, actualPhrase);
 		}
-
-		[Theory]
-		[InlineData(true)]
-		[InlineData(false)]
-		public void DoesSessionHashMatch_WithBothHashesSet_ReturnsExpectedResult(bool hashesMatch)
-		{
-			byte[] ownHash = [1, 2, 3, 4];
-			byte[] remoteHash = hashesMatch ? [1, 2, 3, 4] : [1, 2, 3, 5];
-
-			Assert.Equal(hashesMatch, EncryptionHandler.DoesSessionHashMatch(ownHash, remoteHash));
-		}
-
-		[Fact]
-		public void DoesSessionHashMatch_WithBothHashesNull_ReturnsTrue()
-		{
-			Assert.True(EncryptionHandler.DoesSessionHashMatch(null, null));
-		}
-
-		[Fact]
-		public void DoesSessionHashMatch_WithOnlyOneHashNull_ReturnsFalse()
-		{
-			Assert.False(EncryptionHandler.DoesSessionHashMatch([1, 2, 3], null));
-			Assert.False(EncryptionHandler.DoesSessionHashMatch(null, [1, 2, 3]));
-		}
+		
 
 		private static void AssertRoundTrip(AesGcm encryptingKey, AesGcm decryptingKey)
 		{
