@@ -138,7 +138,7 @@ namespace SODT_CLI.Tests
 		private static async Task<(SodtClient First, SodtClient Second)> ConnectTwoClients()
 		{
 			SodtClient firstClient = CreateClient();
-			await Task.Delay(10);
+			await Task.Delay(100);
 			SodtClient secondClient = CreateClient();
 			await Task.WhenAll(
 				firstClient.Connect(ServerIp, ServerPort, await File.ReadAllTextAsync(ServerCertificatePath)),
