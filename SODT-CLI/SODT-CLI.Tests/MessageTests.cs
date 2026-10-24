@@ -12,10 +12,10 @@ namespace SODT_CLI.Tests
 			[Discovery.CreateResponse(7, [4, 5, 6], [7, 8, 9])],
 			[PingPong.CreateRequest()],
 			[PingPong.CreateResponse()],
-			[KeyExchange.CreateRequest([1, 2], [3, 4], [5, 6])],
-			[KeyExchange.CreateResponse([1, 2], [3, 4], null)],
-			[KeyExchange.CreateError(KeyExchange.CreateRequest([1, 2], [3, 4], [5, 6]))],
-			[KeyExchange.CreateDenied(KeyExchange.CreateRequest([1, 2], [3, 4], [5, 6]))],
+			[KeyExchange.CreateRequest([1, 2])],
+			[KeyExchange.CreateResponse([1, 2])],
+			[KeyExchange.CreateError(KeyExchange.CreateRequest([1, 2]))],
+			[KeyExchange.CreateDenied(KeyExchange.CreateRequest([1, 2]))],
 			[Disconnect.CreateRequest()],
 			[ClientList.CreateRequest()],
 			[ClientList.CreateResponse([1, 2, 3])],
@@ -79,7 +79,7 @@ namespace SODT_CLI.Tests
 		[Fact]
 		public void KeyExchangeStatusFactories_PreserveMessageDataAndUuid()
 		{
-			KeyExchange request = KeyExchange.CreateRequest([1, 2], [3, 4], [5, 6]);
+			KeyExchange request = KeyExchange.CreateRequest([1, 2]);
 
 			KeyExchange error = KeyExchange.CreateError(request);
 			KeyExchange denied = KeyExchange.CreateDenied(request);
@@ -89,8 +89,6 @@ namespace SODT_CLI.Tests
 			Assert.Equal((int)PacketCode.Error, error.Code);
 			Assert.Equal((int)PacketCode.Denied, denied.Code);
 			Assert.Equal(request.Key, error.Key);
-			Assert.Equal(request.Certificate, denied.Certificate);
-			Assert.Equal(request.SessionHash, error.SessionHash);
 		}
 
 		[Fact]

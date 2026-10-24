@@ -320,7 +320,7 @@ namespace SODT_CLI
 		private async Task HandleDiscovery(Discovery discovery)
 		{
 			// basic checks if the discovery message is valid
-			if (discovery.PublicKey == null || discovery.Signature == null || discovery.Id == 0)
+			if (discovery.PublicKey == null || discovery.Signature == null)
 			{
 				SmartConsole.WriteError("Discovery message from server is invalid. Disconnecting.");
 				await DisconnectFromServer();
@@ -336,12 +336,32 @@ namespace SODT_CLI
 				await DisconnectFromServer();
 				return;
 			}
+			switch ((PacketCode)discovery.Code)
+			{
+				case PacketCode.Ok:
+					// generate aes session key for server
+					aesSessionKeys[ServerId] = EncryptionHandler.GenerateSessionKey(ecdhSessionKeyGenerators[ServerId], discovery.PublicKey);
+					// Set own id.
+					if (discovery.Id == 0)
+					{
+						SmartConsole.WriteError("Discovery message from server is invalid. Server assigned id 0 to client. Disconnecting.");
+						await DisconnectFromServer();
+						return;
+					}
+					OwnId = discovery.Id;
+					SmartConsole.WriteDebug($"Connected to server with id {OwnId}.");
+					break;
+				case PacketCode.Denied:
+					SmartConsole.WriteError("Server denied the connection. The server might be full. Disconnecting.");
+					await DisconnectFromServer();
+					break;
+				default:
+					SmartConsole.WriteError("Discovery message from server has an unknown status code. Disconnecting.");
+					await DisconnectFromServer();
+					break;
+			}
 			
-			// generate aes session key for server
-			aesSessionKeys[ServerId] = EncryptionHandler.GenerateSessionKey(ecdhSessionKeyGenerators[ServerId], discovery.PublicKey);
-			// Set own id.
-			OwnId = discovery.Id;
-			SmartConsole.WriteDebug($"Connected to server with id {OwnId}.");
+
 		}
 		
 		/// <summary>

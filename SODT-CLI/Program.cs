@@ -7,7 +7,7 @@
 			SodtClient client = new();
 			CLI cli = new(client);
 			//main loop
-			Console.WriteLine("SODTF-CLI initialized. Type 'help' for a list of commands.");
+			Console.WriteLine("SODT-CLI initialized. Type 'help' for a list of commands.");
 			Console.WriteLine();
 			cli.Run();
 		}
@@ -35,8 +35,6 @@
 				{ "s", "send" },
 				{ "ls", "list-sends" },
 				{ "lr", "list-receives" },
-				{ "spw", "set-session-password" },
-				{ "rstspw", "reset-session-password" },
 				{ "?", "help" },
 				{ "h", "help" }
 			};
@@ -57,7 +55,6 @@
 				{ "list-aliases", new ListAliasesCommand(aliases)}
 			};
 			commands["help"] = new HelpCommand(commands); // help command needs to be added after all other commands are added to the dictionary so it can list them all
-
 		}
 
 
