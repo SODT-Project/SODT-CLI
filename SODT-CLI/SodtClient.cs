@@ -1,6 +1,5 @@
 ﻿using System.Net.Sockets;
 using System.Security.Cryptography;
-using System.Text;
 using SODT_Common;
 
 namespace SODT_CLI
@@ -15,37 +14,6 @@ namespace SODT_CLI
 		private readonly TcpClient client = new();
 		private readonly SemaphoreSlim sendSemaphore = new(1, 1);
 		private readonly Lock cryptoLock = new();
-		
-		/// <summary>
-		/// Contains the session password hash for optional client to client authentication.
-		/// </summary>
-		private byte[]? privateSessionPasswordHash = null;
-		
-		/// <summary>
-		/// Contains a double hashed version of the session password used to verify that all clients have the same password during the key exchange.
-		/// </summary>
-		private byte[]? publicSessionPasswordHash = null;
-		
-		/// <summary>
-		/// Sets the session password for the client. This is used for optional client to client authentication.
-		/// Set to <see langword="null"/> to disable the SessionPassword.
-		/// </summary>
-		public string? SessionPassword
-		{
-			set
-			{
-				if (value == null)
-				{
-					privateSessionPasswordHash = null;
-					publicSessionPasswordHash = null;
-				}
-				else
-				{
-					privateSessionPasswordHash = SHA256.HashData(Encoding.UTF8.GetBytes(value));
-					publicSessionPasswordHash = SHA256.HashData(privateSessionPasswordHash);
-				}
-			}
-		}
 
 		public bool Disconnected { get; private set; } = false;
 		
@@ -64,11 +32,6 @@ namespace SODT_CLI
 		/// This is used to generate the aes key for each connection individually.
 		/// </summary>
 		private readonly Dictionary<byte, ECDiffieHellman> ecdhSessionKeyGenerators = new();
-		
-		/// <summary>
-		/// The certificate for this client to validate its authenticity during the session
-		/// </summary>
-		private readonly ECDsa ecdsaSessionCertificate = ECDsa.Create(ECCurve.NamedCurves.nistP256);
 
 		/// <summary>
 		/// The certificate of the server to validate its authenticity during the session
@@ -165,8 +128,8 @@ namespace SODT_CLI
 					if (!aesSessionKeys.TryGetValue(targetId, out AesGcm? aes))
 					{
 						//This case should never happen because the CLI always checks and requests, if necessary, a key exchange before sending a message.
-						SmartConsole.WriteError($"No key for target client {targetId} to encrypt with. How do you even get here?");
-						throw new InvalidOperationException("No key for target client to encrypt with."); // TODO remove this or handle better because of new sructure it will happen more often.
+						SmartConsole.WriteError($"No key for target client {targetId} to encrypt with.");
+						throw new InvalidOperationException("No key for target client to encrypt with.");
 					}
 					
 					EncryptionHandler.EncryptAesGcm(aes, baseMessage, finalMessage);
@@ -235,8 +198,6 @@ namespace SODT_CLI
 			OwnId = 0;
 			aesSessionKeys.Clear();
 			ecdhSessionKeyGenerators.Clear();
-			ecdsaSessionCertificate.Dispose();
-			SessionPassword = null;
 			client.Close();
 			Disconnected = true;
 		}
@@ -369,7 +330,7 @@ namespace SODT_CLI
 			// verify discovery message
 			byte[] clientEcdhPublicKey = ecdhSessionKeyGenerators[ServerId].ExportSubjectPublicKeyInfo();
 			byte[] toVerify = [..clientEcdhPublicKey, ..discovery.PublicKey /*Server's ECDH public key*/, discovery.Id];
-			if (!ecdsaServerCertificate.VerifyData(toVerify, discovery.Signature, HashAlgorithmName.SHA256))
+			if (!ecdsaServerCertificate!.VerifyData(toVerify, discovery.Signature, HashAlgorithmName.SHA256)) // serverCertificate is not null because it is set in Connect() before the discovery message is sent
 			{
 				SmartConsole.WriteError("Discovery message from server is signed with an invalid signature. Possible man-in-the-middle attack. Disconnecting.");
 				await DisconnectFromServer();
@@ -401,7 +362,7 @@ namespace SODT_CLI
 			}
 			SmartConsole.WriteInfo($"Requesting key exchange with {targetId}.");
 			ecdhSessionKeyGenerators[targetId] = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-			KeyExchange exchange = KeyExchange.CreateRequest(ecdhSessionKeyGenerators[targetId].ExportSubjectPublicKeyInfo(), ecdsaSessionCertificate.ExportSubjectPublicKeyInfo(), publicSessionPasswordHash);
+			KeyExchange exchange = KeyExchange.CreateRequest(ecdhSessionKeyGenerators[targetId].ExportSubjectPublicKeyInfo());
 			await SendUnencrypted(targetId, exchange);
 		}
 		
@@ -425,18 +386,6 @@ namespace SODT_CLI
 				await SendUnencrypted(remoteId, KeyExchange.CreateError(exchange));
 				return;
 			}
-
-			// additionally check of same session password hashes
-			PacketCode code = (PacketCode)exchange.Code;
-			if (code == PacketCode.Request || code == PacketCode.Ok)
-			{
-				if (!EncryptionHandler.DoesSessionHashMatch(publicSessionPasswordHash, exchange.SessionHash))
-				{
-					SmartConsole.WriteError("Key exchange failed because the session password hashes do not match.");
-					await SendUnencrypted(remoteId, KeyExchange.CreateDenied(exchange));
-					return;	
-				}
-			}
 			
 			switch ((PacketCode)exchange.Code)
 			{
@@ -455,7 +404,7 @@ namespace SODT_CLI
 						SmartConsole.WriteInfo($"Shared phrase with client {remoteId}: {EncryptionHandler.GetSharedPhrase(ecdhSessionKeyGenerators[remoteId], exchange.Key)}");
 					}
 					//send ok
-					KeyExchange exchangeAccepted = KeyExchange.CreateResponse(ecdhSessionKeyGenerators[remoteId].ExportSubjectPublicKeyInfo(), ecdsaSessionCertificate.ExportSubjectPublicKeyInfo(), publicSessionPasswordHash);
+					KeyExchange exchangeAccepted = KeyExchange.CreateResponse(ecdhSessionKeyGenerators[remoteId].ExportSubjectPublicKeyInfo());
 					await SendUnencrypted(remoteId, exchangeAccepted);
 					break;
 				case PacketCode.Ok: // PaketCode.Ok is received when the target client accepts the key exchange
