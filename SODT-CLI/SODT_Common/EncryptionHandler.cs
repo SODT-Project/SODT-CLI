@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using SODT_CLI;
 
 namespace SODT_Common
 {
@@ -84,6 +85,14 @@ namespace SODT_Common
 				return false;
 			
 			return ownPublicSessionPasswordHash.SequenceEqual(remotePublicSessionPasswordHash);
+		}
+		
+		public static string GetSharedPhrase(ECDiffieHellman ownPublicKey, byte[] remotePublicKey)
+		{
+			var otherPublicKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+			otherPublicKey.ImportSubjectPublicKeyInfo(remotePublicKey, out _);
+			byte[] derivedKey = ownPublicKey.DeriveKeyFromHash(otherPublicKey.PublicKey, HashAlgorithmName.SHA256);
+			return $"{derivedKey[0]:X2}-{derivedKey[4]:X2}-{derivedKey[8]:X2}-{derivedKey[16]:X2}-{derivedKey[31]:X2}";
 		}
 	}
 }

@@ -104,6 +104,40 @@ namespace SODT_CLI.Tests
 			Assert.ThrowsAny<CryptographicException>(() => EncryptionHandler.DecryptAesGcm(remoteSessionKey, encryptedMessage, decryptedMessage));
 		}
 
+		[Fact]
+		public void GetSharedPhrase_WithMatchingKeyPairs_ReturnsSamePhrase()
+		{
+			using ECDiffieHellman ownKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+			using ECDiffieHellman remoteKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+
+			string ownPhrase = EncryptionHandler.GetSharedPhrase(
+				ownKey,
+				remoteKey.ExportSubjectPublicKeyInfo());
+			string remotePhrase = EncryptionHandler.GetSharedPhrase(
+				remoteKey,
+				ownKey.ExportSubjectPublicKeyInfo());
+
+			Assert.Equal(ownPhrase, remotePhrase);
+			Assert.Matches("^(?:[0-9A-F]{2}-){4}[0-9A-F]{2}$", ownPhrase);
+		}
+
+		[Fact]
+		public void GetSharedPhrase_ReturnsExpectedDerivedKeyBytes()
+		{
+			using ECDiffieHellman ownKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+			using ECDiffieHellman remoteKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+			byte[] remotePublicKey = remoteKey.ExportSubjectPublicKeyInfo();
+			byte[] derivedKey = ownKey.DeriveKeyFromHash(
+				remoteKey.PublicKey,
+				HashAlgorithmName.SHA256);
+			string expectedPhrase =
+				$"{derivedKey[0]:X2}-{derivedKey[4]:X2}-{derivedKey[8]:X2}-{derivedKey[16]:X2}-{derivedKey[31]:X2}";
+
+			string actualPhrase = EncryptionHandler.GetSharedPhrase(ownKey, remotePublicKey);
+
+			Assert.Equal(expectedPhrase, actualPhrase);
+		}
+
 		[Theory]
 		[InlineData(true)]
 		[InlineData(false)]

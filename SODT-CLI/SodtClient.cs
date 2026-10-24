@@ -389,6 +389,16 @@ namespace SODT_CLI
 		/// <param name="targetId">The id of the client to exchange a key with.</param>
 		public async Task RequestKeyExchange(byte targetId)
 		{
+			if (targetId == OwnId)
+			{
+				SmartConsole.WriteError($"Cannot request key exchange with {targetId} because the target id is the same as the own id.");
+				return;
+			}
+			if (!connectedClients.Contains(targetId))
+			{
+				SmartConsole.WriteError($"Cannot request key exchange with {targetId} because the client is not connected.");
+				return;
+			}
 			SmartConsole.WriteInfo($"Requesting key exchange with {targetId}.");
 			ecdhSessionKeyGenerators[targetId] = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 			KeyExchange exchange = KeyExchange.CreateRequest(ecdhSessionKeyGenerators[targetId].ExportSubjectPublicKeyInfo(), ecdsaSessionCertificate.ExportSubjectPublicKeyInfo(), publicSessionPasswordHash);
@@ -404,6 +414,11 @@ namespace SODT_CLI
 		private async Task HandleKeyExchange(KeyExchange exchange, byte remoteId)
 		{
 			//handle possible errors
+			if (remoteId == OwnId)
+			{
+				SmartConsole.WriteError($"Key exchange between {OwnId} and {remoteId} failed because the remote id is the same as the own id.");
+				return;
+			}
 			if (exchange.Key == null)
 			{
 				SmartConsole.WriteError($"Key exchange between {OwnId} and {remoteId} failed because the key is null.");
@@ -436,20 +451,26 @@ namespace SODT_CLI
 					{
 						ecdhSessionKeyGenerators[remoteId] = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 						aesSessionKeys[remoteId] = EncryptionHandler.GenerateSessionKey(ecdhSessionKeyGenerators[remoteId], exchange.Key);
+						SmartConsole.WriteInfo($"Key exchange with {remoteId} accepted. Please check your shared phrase with the other client to verify the authenticity of the connection.");
+						SmartConsole.WriteInfo($"Shared phrase with client {remoteId}: {EncryptionHandler.GetSharedPhrase(ecdhSessionKeyGenerators[remoteId], exchange.Key)}");
 					}
 					//send ok
-					SmartConsole.WriteInfo($"Key exchange with {remoteId} accepted.");
 					KeyExchange exchangeAccepted = KeyExchange.CreateResponse(ecdhSessionKeyGenerators[remoteId].ExportSubjectPublicKeyInfo(), ecdsaSessionCertificate.ExportSubjectPublicKeyInfo(), publicSessionPasswordHash);
 					await SendUnencrypted(remoteId, exchangeAccepted);
 					break;
 				case PacketCode.Ok: // PaketCode.Ok is received when the target client accepts the key exchange
-					if (!ecdhSessionKeyGenerators.TryGetValue(remoteId, out ECDiffieHellman? ecdhGenerator))
+					lock (cryptoLock)
 					{
-						SmartConsole.WriteError($"Key exchange with client {remoteId} failed the key exchange was never requested.");
-						return;
+						if (!ecdhSessionKeyGenerators.TryGetValue(remoteId, out ECDiffieHellman? ecdhGenerator))
+						{
+							SmartConsole.WriteError($"Key exchange with client {remoteId} failed the key exchange was never requested.");
+							return;
+						}
+						aesSessionKeys[remoteId] = EncryptionHandler.GenerateSessionKey(ecdhGenerator, exchange.Key);
+						SmartConsole.WriteInfo($"Client {remoteId} accepted key exchange. Please check your shared phrase with the other client to verify the authenticity of the connection.");
+						SmartConsole.WriteInfo($"Shared phrase with client {remoteId}: {EncryptionHandler.GetSharedPhrase(ecdhGenerator, exchange.Key)}");
 					}
-					aesSessionKeys[remoteId] = EncryptionHandler.GenerateSessionKey(ecdhGenerator, exchange.Key);
-					SmartConsole.WriteInfo($"Client {remoteId} accepted key exchange.");
+					
 					break;
 				case PacketCode.Error:
 				case PacketCode.Denied:
