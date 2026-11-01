@@ -36,7 +36,9 @@ namespace SODT_CLI
 		/// <summary>
 		/// The certificate of the server to validate its authenticity during the session
 		/// </summary>
-		private ECDsa? ecdsaServerCertificate;
+		// this is initialized in Connect() and used in HandleDiscovery() to verify the server's signature
+		// this cant be added in the constructor because the server certificate is not known at that point because of CLI needs SodtClient object
+		private ECDsa? ecdsaServerCertificate; 
 		
 		/// <summary>
 		/// Contains all clients that are connected to the server.

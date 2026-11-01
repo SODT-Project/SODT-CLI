@@ -56,7 +56,7 @@ namespace SODT_Common
 		/// <summary>
 		/// The total size of the message content plus 2 bytes that define the inner content size.
 		/// </summary>
-		public const int MessageWithHeaders = FullMessageSize - IdSize;
+		public const int MessageWithHeaders = FullMessageSize - IdSize; // TODO delete
 		
 		/// <summary>
 		/// The maximum size of the message content, excluding the content length header and source/target IDs.
