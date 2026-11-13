@@ -111,7 +111,11 @@ namespace SODT_CLI
 				return copy;
 			}
 		}
-		
+
+		public bool AutoAcceptKeyExchanges { get; set; }
+
+		public bool AutoAcceptFileTransfers { get; set; }
+
 		/// <summary>
 		/// Sends a message to the server or a client and encrypts it with the server public key or the client aes key.
 		/// </summary>
@@ -412,7 +416,7 @@ namespace SODT_CLI
 			switch ((PacketCode)exchange.Code)
 			{
 				case PacketCode.Request: // PaketCode.Request is received when the target client requests a key exchange
-					bool permission = await SmartConsole.AskYesNo($"Client {remoteId} requests a key exchange. Do you want to accept the key exchange?");
+					bool permission = AutoAcceptKeyExchanges || await SmartConsole.AskYesNo($"Client {remoteId} requests a key exchange. Do you want to accept the key exchange?");
 					if (!permission)
 					{
 						await SendUnencrypted(remoteId, KeyExchange.CreateDenied(exchange));
@@ -544,7 +548,7 @@ namespace SODT_CLI
 		private async Task<bool> PrepareReceiveFile(Transfer transfer, byte sourceId)
 		{
 			//prepare receiving file
-			bool permission = await SmartConsole.AskYesNo($"Client {sourceId} requests a file transfer. Do you want to accept the file {transfer.FileName} ({transfer.FileSize / 1000} KB)?");
+			bool permission = AutoAcceptFileTransfers || await SmartConsole.AskYesNo($"Client {sourceId} requests a file transfer. Do you want to accept the file {transfer.FileName} ({transfer.FileSize / 1000} KB)?");
 			if (!permission) return false;
 			
 			incomingFileStreams.Add(transfer.Uuid, new FileStream(Path.Combine(SaveFilePath, transfer.FileName), FileMode.Create, FileAccess.ReadWrite, FileShare.None));

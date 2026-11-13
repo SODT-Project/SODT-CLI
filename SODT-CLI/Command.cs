@@ -110,6 +110,47 @@ namespace SODT_CLI
 			SmartConsole.WriteInfo($"Connected clients: {clients}");
 		}
 	}
+	internal class AutoAcceptFileTransferCommand : ICommand
+	{
+		public string Description => "Sets the auto accept mode for file transfers. Usage: auto-accept-files <true/false>.";
+
+		public void Execute(SodtClient client, params string[] args)
+		{
+			if (args.Length != 1) throw new ArgumentException("Invalid number of arguments!");
+			if (!bool.TryParse(args[0], out bool autoAccept)) throw new ArgumentException("Invalid argument!");
+			client.AutoAcceptFileTransfers = autoAccept;
+			SmartConsole.WriteInfo($"Auto accept mode set to {autoAccept}");
+		}
+		
+	}
+	internal class AutoAcceptKeyExchangeCommand : ICommand
+	{
+		public string Description => "Sets the auto accept mode for key exchanges. Usage: auto-accept-keys <true/false>.";
+
+		public void Execute(SodtClient client, params string[] args)
+		{
+			if (args.Length != 1) throw new ArgumentException("Invalid number of arguments!");
+			if (!bool.TryParse(args[0], out bool autoAccept)) throw new ArgumentException("Invalid argument!");
+			client.AutoAcceptKeyExchanges = autoAccept;
+			SmartConsole.WriteInfo($"Auto accept mode set to {autoAccept}");
+		}
+		
+	}
+	internal class AutoAcceptAllCommand : ICommand
+	{
+		public string Description => "Sets the auto accept mode for file transfers and key exchanges. Usage: auto-accept-all <true/false>.";
+
+		public void Execute(SodtClient client, params string[] args)
+		{
+			if (args.Length != 1) throw new ArgumentException("Invalid number of arguments!");
+			if (!bool.TryParse(args[0], out bool autoAccept)) throw new ArgumentException("Invalid argument!");
+			client.AutoAcceptFileTransfers = autoAccept;
+			client.AutoAcceptKeyExchanges = autoAccept;
+			SmartConsole.WriteInfo($"Auto accept mode set to {autoAccept}");
+		}
+		
+	}
+	
 	/// <summary>
 	/// Command to disconnect from the server.
 	/// </summary>
@@ -478,7 +519,6 @@ namespace SODT_CLI
 			{
 				SmartConsole.WriteInfo($"{command}: \t{value.Description}");
 			}
-			SmartConsole.WriteInfo($"help: \t{Description}");
 		}
 	}
 }

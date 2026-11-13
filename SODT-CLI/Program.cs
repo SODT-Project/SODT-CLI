@@ -36,7 +36,8 @@
 				{ "ls", "list-sends" },
 				{ "lr", "list-receives" },
 				{ "?", "help" },
-				{ "h", "help" }
+				{ "h", "help" },
+				{"aaa", "auto-accept-all" }
 			};
 			commands = new()
 			{
@@ -52,6 +53,9 @@
 				{ "list-sends", new ListSendsCommand() },
 				{ "list-receives", new ListReceivesCommand() },
 				{"clear", new ClearCommand() },
+				{ "auto-accept-files", new AutoAcceptFileTransferCommand() },
+				{ "auto-accept-keys", new AutoAcceptKeyExchangeCommand() },
+				{"auto-accept-all", new AutoAcceptAllCommand() },
 				{ "list-aliases", new ListAliasesCommand(aliases)}
 			};
 			commands["help"] = new HelpCommand(commands); // help command needs to be added after all other commands are added to the dictionary so it can list them all
