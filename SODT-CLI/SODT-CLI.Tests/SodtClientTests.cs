@@ -82,8 +82,6 @@ namespace SODT_CLI.Tests
 			try
 			{
 				await firstClient.RequestKeyExchange(secondClient.OwnId);
-				await AnswerNextApprovalPrompt(true);
-
 				await WaitUntilAsync(
 					() => firstClient.IsKeyExchanged(secondClient.OwnId)
 						&& secondClient.IsKeyExchanged(firstClient.OwnId));
@@ -115,11 +113,10 @@ namespace SODT_CLI.Tests
 			try
 			{
 				await sender.RequestKeyExchange(receiver.OwnId);
-				await AnswerNextApprovalPrompt(true);
 				await WaitUntilAsync(() => sender.IsKeyExchanged(receiver.OwnId)
 					&& receiver.IsKeyExchanged(sender.OwnId));
 				Assert.True(await sender.RequestFileTransfer(receiver.OwnId, sourcePath));
-				await AnswerNextApprovalPrompt(true);
+
 				await WaitUntilAsync(() => File.Exists(destinationPath)
 					&& !sender.SendFileStreamProgress.Any()
 					&& !receiver.ReceivedFileStreamProgress.Any());
@@ -140,36 +137,13 @@ namespace SODT_CLI.Tests
 			SodtClient firstClient = CreateClient();
 			await Task.Delay(100);
 			SodtClient secondClient = CreateClient();
-			await Task.WhenAll(
-				firstClient.Connect(ServerIp, ServerPort, await File.ReadAllTextAsync(ServerCertificatePath)),
-				secondClient.Connect(ServerIp, ServerPort, await File.ReadAllTextAsync(ServerCertificatePath)));
+			Task connectFirst = firstClient.Connect(ServerIp, ServerPort, await File.ReadAllTextAsync(ServerCertificatePath));
+			await Task.Delay(100);
+			Task connectSecond = secondClient.Connect(ServerIp, ServerPort, await File.ReadAllTextAsync(ServerCertificatePath));
+			await Task.WhenAll(connectFirst, connectSecond);
 			await WaitUntilAsync(() => firstClient.OwnId != 0 && secondClient.OwnId != 0);
-			await Task.Delay(1000);
+			await Task.Delay(100);
 			return (firstClient, secondClient);
-		}
-
-		private static async Task AnswerNextApprovalPrompt(bool answer)
-		{
-			Type consoleType = typeof(SodtClient).Assembly.GetType("SODT_CLI.SmartConsole")!;
-			FieldInfo promptField = consoleType.GetField("yesNoTask", BindingFlags.Static | BindingFlags.NonPublic)!;
-			FieldInfo activeField = consoleType.GetField("yesNoQuestionActive", BindingFlags.Static | BindingFlags.NonPublic)!;
-
-			TaskCompletionSource<bool> currentPrompt = (TaskCompletionSource<bool>)promptField.GetValue(null)!;
-			if (!(bool)activeField.GetValue(null)! && currentPrompt.Task.IsCompleted)
-				promptField.SetValue(null, new TaskCompletionSource<bool>());
-
-			for (int attempt = 0; attempt < CommunicationTimeoutMilliseconds / 10; attempt++)
-			{
-				TaskCompletionSource<bool> prompt = (TaskCompletionSource<bool>)promptField.GetValue(null)!;
-				if ((bool)activeField.GetValue(null)! && !prompt.Task.IsCompleted)
-				{
-					prompt.SetResult(answer);
-					activeField.SetValue(null, false);
-					return;
-				}
-				await Task.Delay(10);
-			}
-			Assert.Fail("No approval prompt was raised before the timeout.");
 		}
 
 		private static async Task WaitUntilAsync(Func<bool> condition)
@@ -216,7 +190,11 @@ namespace SODT_CLI.Tests
 
 		private static SodtClient CreateClient()
 		{
-			return new SodtClient();
+			return new SodtClient
+			{
+				AutoAcceptKeyExchanges = true,
+				AutoAcceptFileTransfers = true
+			};
 		}
 	}
 }
