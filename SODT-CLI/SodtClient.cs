@@ -6,13 +6,40 @@ namespace SODT_CLI
 {
 	internal class SodtClient
 	{
+		/// <summary>
+		/// The ID of the server that is used to identify the server in the network and to encrypt/decrypt messages with the server.
+		/// </summary>
 		private const byte ServerId = 1;
+		
+		/// <summary>
+		/// The path where incoming files will be saved. This is set to the Downloads folder of the user profile.
+		/// </summary>
 		private static readonly string SaveFilePath = Path.Combine(
 			Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
 			"Downloads"); // Downloads is mostly the correct name. going with it for now
+		
+		/// <summary>
+		/// The ID of the client that is assigned by the server during the discovery process.
+		/// This ID is used to identify the client in the network and to encrypt/decrypt messages with other clients or the server.
+		/// If the client is not connected to the server, this ID is 0.
+		/// </summary>
 		public byte OwnId { get; private set; }
+		
+		/// <summary>
+		/// The TcpClient that is used to connect to the server and send/receive messages.
+		/// </summary>
 		private readonly TcpClient client = new();
+		
+		/// <summary>
+		/// Semaphore to ensure that only one message is sent at a time.
+		/// This is necessary because the TcpClient is not thread-safe and sending multiple messages at the same time can cause data corruption.
+		/// </summary>
 		private readonly SemaphoreSlim sendSemaphore = new(1, 1);
+		
+		/// <summary>
+		/// Lock object to ensure that cryptographic operations are thread-safe.
+		/// This is necessary because the AesGcm and ECDiffieHellman classes are not thread-safe.
+		/// </summary>
 		private readonly Lock cryptoLock = new();
 
 		public bool Disconnected { get; private set; } = false;
@@ -34,10 +61,10 @@ namespace SODT_CLI
 		private readonly Dictionary<byte, ECDiffieHellman> ecdhSessionKeyGenerators = new();
 
 		/// <summary>
-		/// The certificate of the server to validate its authenticity during the session
+		/// The certificate of the server to validate its authenticity during the session.
+		/// The is initialized in Connect() and used in HandleDiscovery() to verify the server's signature.
 		/// </summary>
-		// this is initialized in Connect() and used in HandleDiscovery() to verify the server's signature
-		// this cant be added in the constructor because the server certificate is not known at that point because of CLI needs SodtClient object
+		// this cant be added in the constructor because the server certificate is not known at that point because the CLI needs SodtClient object beforehand
 		private ECDsa? ecdsaServerCertificate; 
 		
 		/// <summary>
@@ -50,6 +77,9 @@ namespace SODT_CLI
 		/// </summary>
 		private readonly Dictionary<int, FileStream> incomingFileStreams = new();
 
+		/// <summary>
+		/// Contains the metadata for the incoming file transfers. Its main use is to store the file hash for verification after the transfer is complete.
+		/// </summary>
 		private readonly Dictionary<int, Transfer> incomingFileStreamMetaData = new();
 
 		/// <summary>
@@ -90,6 +120,7 @@ namespace SODT_CLI
 				return copy;
 			}
 		}
+		
 		/// <summary>
 		/// Contains the progress in percent of the file transfers that are being sent.
 		/// Key is the uuid of the transfer, value is the progress in percent.
@@ -112,17 +143,23 @@ namespace SODT_CLI
 			}
 		}
 
+		/// <summary>
+		/// If set to true, the client will automatically accept key exchange requests from other clients without prompting the user.
+		/// </summary>
 		public bool AutoAcceptKeyExchanges { get; set; }
 
+		/// <summary>
+		/// If set to true, the client will automatically accept file transfer requests from other clients without prompting the user.
+		/// </summary>
 		public bool AutoAcceptFileTransfers { get; set; }
 
 		/// <summary>
-		/// Sends a message to the server or a client and encrypts it with the server public key or the client aes key.
+		/// Sends a message to the server or a client and encrypts it with the matching aes session key.
 		/// </summary>
-		/// <param name="targetId">Destination id for this package. Set to 0 to address the message to the server.</param>
+		/// <param name="targetId">Destination id for this package. Set to 1 to address the message to the server.</param>
 		/// <param name="baseMessage">Message to be sent.</param>
 		/// <returns></returns>
-		/// <exception cref="InvalidOperationException"></exception>
+		/// <exception cref="InvalidOperationException">Thrown when no key is available for the target client.</exception>
 		private async Task SendEncrypted(byte targetId, IBaseMessage baseMessage)
 		{
 			await sendSemaphore.WaitAsync();
@@ -151,6 +188,11 @@ namespace SODT_CLI
 			}
 		}
 		
+		/// <summary>
+		/// Sends a message to the server or a client without encryption. This is used for key exchanges and discovery messages.
+		/// </summary>
+		/// <param name="targetId"></param>
+		/// <param name="baseMessage"></param>
 		private async Task SendUnencrypted(byte targetId, IBaseMessage baseMessage)
 		{
 			await sendSemaphore.WaitAsync();
@@ -166,7 +208,8 @@ namespace SODT_CLI
 		}
 
 		/// <summary>
-		/// Connects to the server via Discovery and starts the receive loop.
+		/// Connects to the server via Discovery and starts the receive-loop and the ping-loop.
+		/// This will also load the server certificate from the given PEM string.
 		/// </summary>
 		/// <param name="host">The host of the server.</param>
 		/// <param name="port">The port of the server.</param>
@@ -190,7 +233,7 @@ namespace SODT_CLI
 
 		/// <summary>
 		/// DisconnectFromServer from the server and send a disconnect message.
-		/// This will also clear the own id, the connected clients, and dispose the server session aes as well as the client.
+		/// This will also clear the own id, the connected clients, any other dictionary entries, and dispose the server session aes as well as the client.
 		/// </summary>
 		/// <returns></returns>
 		public async Task DisconnectFromServer()
@@ -202,14 +245,20 @@ namespace SODT_CLI
 			}
 			catch { /*Ignore. Announcing Disconnect is optional anyway.*/ }
 			OwnId = 0;
+			client.Close();
 			aesSessionKeys.Clear();
 			ecdhSessionKeyGenerators.Clear();
-			client.Close();
+			incomingFileStreamMetaData.Clear();
+			pendingFiles.Clear();
+			incomingFileStreams.Clear();
+			connectedClients.Clear();
+			receivedFileProgress.Clear();
+			sendFileProgress.Clear();
 			Disconnected = true;
 		}
 
 		/// <summary>
-		/// Creates a new receive loop that listens for incoming messages asynchronously.
+		/// Creates a new receive-loop that listens for incoming messages asynchronously.
 		/// </summary>
 		private async Task Receive()
 		{
@@ -277,6 +326,13 @@ namespace SODT_CLI
             return MessageHandler.ParseDecryptedMessage(decryptedMessage);
 		}
 		
+		/// <summary>
+		/// Handles the received buffer from the server or a client.
+		/// The buffer is decrypted and parsed into a message.
+		/// The message is then handled based on its type by an appropriate handler method.
+		/// </summary>
+		/// <param name="buffer">The received buffer.</param>
+		/// <param name="sourceId">The ID of the client that sent the buffer.</param>
 		private async Task HandleReceivedBuffer(byte[] buffer, byte sourceId)
 		{
 			var message = Decrypt(buffer, sourceId);
@@ -311,6 +367,10 @@ namespace SODT_CLI
 			}
 		}
 		
+		/// <summary>
+		/// Sends a ping message to the server every 3 seconds to check if the connection is still alive.
+		/// The Server will disconnect the client if it does not receive a ping message within x seconds.
+		/// </summary>
 		private async Task SendPingPeriodically()
 		{
 			while (client.Connected)
@@ -323,6 +383,12 @@ namespace SODT_CLI
 			}
 		}
 
+		/// <summary>
+		/// Handles the received discovery message from the server.
+		/// The signature of the discovery message is verified with the server certificate.
+		/// If the signature is valid, the aes session key for the server is generated and the own id is set.
+		/// </summary>
+		/// <param name="discovery">The received discovery message.</param>
 		private async Task HandleDiscovery(Discovery discovery)
 		{
 			// basic checks if the discovery message is valid
@@ -366,8 +432,6 @@ namespace SODT_CLI
 					await DisconnectFromServer();
 					break;
 			}
-			
-
 		}
 		
 		/// <summary>
@@ -393,7 +457,7 @@ namespace SODT_CLI
 		}
 		
 		/// <summary>
-		/// Handles a key exchange message from the target client. This can be a request, an acceptance, or a denial of the key exchange.
+		/// Handles a key exchange message from the target client. This can be a request, an acceptance, a denial or an error of the key exchange.
 		/// </summary>
 		/// <param name="exchange">The key exchange message to handle.</param>
 		/// <param name="remoteId">The id of the remote client.</param>
@@ -487,6 +551,13 @@ namespace SODT_CLI
 			}
 		}
 		
+		/// <summary>
+		/// Handles a file transfer message from the target client. This can be a request, an acceptance,
+		/// an acknowledgment, a denial, or an error of the file transfer.
+		/// </summary>
+		/// <param name="transfer">The received transfer message.</param>
+		/// <param name="sourceId">The ID of the source client.</param>
+		/// <exception cref="NotImplementedException">Thrown when a transfer code is not implemented yet.</exception>
 		private async Task HandleTransfer(Transfer transfer, byte sourceId)
 		{
 			try{
@@ -534,6 +605,10 @@ namespace SODT_CLI
 			}
 		}
 		
+		/// <summary>
+		/// Cleans up the incoming file transfer by closing the file stream and removing it from the incomingFileStreams dictionary. <br></br>
+		/// </summary>
+		/// <param name="transferUuid">The UUID of the transfer to clean up.</param>
 		private void CleanIncomingFileTransfer(int transferUuid)
 		{
 			if (incomingFileStreams.TryGetValue(transferUuid, out FileStream? fileStream))
@@ -545,6 +620,13 @@ namespace SODT_CLI
 			receivedFileProgress.Remove(transferUuid);
 		}
 		
+		/// <summary>
+		/// Prepares the client to receive a file transfer by creating a file stream and adding it to the incomingFileStreams dictionary. <br></br>
+		/// If the file transfer is accepted, the file stream will be used to write the incoming file data.
+		/// </summary>
+		/// <param name="transfer">The Transfer request.</param>
+		/// <param name="sourceId">The ID of the source client.</param>
+		/// <returns></returns>
 		private async Task<bool> PrepareReceiveFile(Transfer transfer, byte sourceId)
 		{
 			//prepare receiving file
@@ -563,6 +645,13 @@ namespace SODT_CLI
 			return true;
 		}
 
+		/// <summary>
+		/// Sends the file to the target client in chunks of MessageHelper.FileBufferSize bytes. <br></br>
+		/// If the transfer fails, an error message is sent to the target client and the transfer is aborted. <br></br>
+		/// The file is read from the pendingFiles dictionary and the progress is updated in the sendFileProgress dictionary. <br></br>
+		/// </summary>
+		/// <param name="targetId"> The ID of the target client.</param>
+		/// <param name="transferUuid">The UUID of the transfer. Used to identify the transfer in the pendingFiles and sendFileProgress dictionaries.</param>
 		private async Task SendFile(byte targetId, int transferUuid)
 		{
 			FileStream? stream = null;
@@ -603,6 +692,13 @@ namespace SODT_CLI
 			}
 		}
 		
+		/// <summary>
+		/// Receives a file transfer data message and writes the data to the corresponding file stream at the specified position. <br></br>
+		/// If the transfer is complete, the file stream is closed and an acknowledgement is sent.
+		/// If it receives data for a file transfer that was not requested, it will ignore the data and log a warning.
+		/// </summary>
+		/// <param name="transferData">Received file transfer data.</param>
+		/// <param name="remoteId">The ID of the remote client.</param>
 		private async Task ReceiveFile(TransferData transferData, byte remoteId)
 		{
 			//get file stream
@@ -641,6 +737,12 @@ namespace SODT_CLI
 			}
 		}
 
+		/// <summary>
+		/// Verifies the integrity of the received file by comparing its hash with the provided verification hash.
+		/// </summary>
+		/// <param name="receivedFile">The received file to verify as a FileStream.</param>
+		/// <param name="verifyHash">The hash to compare against.</param>
+		/// <returns></returns>
 		private static bool VerifyFileIntegrity(FileStream receivedFile, byte[] verifyHash)
 		{
 			receivedFile.Position = 0;
@@ -648,6 +750,11 @@ namespace SODT_CLI
 			return hash.SequenceEqual(verifyHash);
 		}
 
+		/// <summary>
+		/// Sends an acknowledgement message to the target client for the received file transfer.
+		/// </summary>
+		/// <param name="originalRequest">The original file transfer request.</param>
+		/// <param name="targetId">The ID of the target client.</param>
 		private async Task SendAcknowledgement(Transfer originalRequest, byte targetId)
 		{
 			Transfer ack = Transfer.CreateAcknowledgement(originalRequest);

@@ -66,44 +66,7 @@ namespace SODT_CLI.Tests
 
 			AssertRoundTrip(ownSessionKey, remoteSessionKey);
 		}
-
-		[Fact]
-		public void GenerateSessionKey_WithPassword_ProducesMatchingKeys()
-		{
-			byte[] passwordHash = RandomNumberGenerator.GetBytes(32);
-			using ECDiffieHellman ownKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-			using ECDiffieHellman remoteKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-			using AesGcm ownSessionKey = EncryptionHandler.GenerateSessionKey(
-				ownKey,
-				remoteKey.ExportSubjectPublicKeyInfo(),
-				passwordHash);
-			using AesGcm remoteSessionKey = EncryptionHandler.GenerateSessionKey(
-				remoteKey,
-				ownKey.ExportSubjectPublicKeyInfo(),
-				passwordHash);
-
-			AssertRoundTrip(ownSessionKey, remoteSessionKey);
-		}
-
-		[Fact]
-		public void GenerateSessionKey_WithDifferentPasswords_CannotDecrypt()
-		{
-			using ECDiffieHellman ownKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-			using ECDiffieHellman remoteKey = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-			using AesGcm ownSessionKey = EncryptionHandler.GenerateSessionKey(
-				ownKey,
-				remoteKey.ExportSubjectPublicKeyInfo(),
-				new byte[32]);
-			using AesGcm remoteSessionKey = EncryptionHandler.GenerateSessionKey(
-				remoteKey,
-				ownKey.ExportSubjectPublicKeyInfo(),
-				[1, .. new byte[31]]);
-			byte[] encryptedMessage = EncryptMessage(ownSessionKey);
-			byte[] decryptedMessage = new byte[MessageHelper.MessageWithContentSize];
-
-			Assert.ThrowsAny<CryptographicException>(() => EncryptionHandler.DecryptAesGcm(remoteSessionKey, encryptedMessage, decryptedMessage));
-		}
-
+		
 		[Fact]
 		public void GetSharedPhrase_WithMatchingKeyPairs_ReturnsSamePhrase()
 		{

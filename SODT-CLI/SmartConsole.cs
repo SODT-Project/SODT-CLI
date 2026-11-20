@@ -1,13 +1,27 @@
 ﻿namespace SODT_CLI
 {
+	/// <summary>
+	/// Class that contains a collection of methods to interact with the console and the user.
+	/// This class handles writing messages and reading user input while ensuring thread safety.
+	/// </summary>
 	internal static class SmartConsole
 	{
 		/// <summary>
 		/// Object that is used to lock the Console to prevent multiple threads from writing at the same time
 		/// </summary>
 		public static object LockObject { get; } = new();
+		/// <summary>
+		/// Indicates whether debug output should be shown in the console. If set to true, debug messages will be displayed; otherwise, they will be suppressed.
+		/// </summary>
 		public static bool ShowDebugOutput { get; set; } = false;
+		/// <summary>
+		/// Indicates whether a yes/no question is currently active. This is used to manage user input for yes/no prompts.
+		/// </summary>
 		private static bool yesNoQuestionActive = false;
+		/// <summary>
+		/// TaskCompletionSource used to manage the result of a yes/no question.
+		/// When a yes/no question is asked, this TaskCompletionSource will be completed with the user's response (true for yes, false for no).
+		/// </summary>
 		private static TaskCompletionSource<bool> yesNoTask = new();
 		/// <summary>
 		/// Adds a message to the writeRequests queue.
@@ -31,7 +45,7 @@
 		/// <summary>
 		/// Writes a message to the console with red text.
 		/// </summary>
-		/// <param name="text"></param>
+		/// <param name="text">The text to write.</param>
 		public static void WriteError(string text)
 		{
 			RequestWriteLine(text, ConsoleColor.Red);
@@ -39,7 +53,7 @@
 		/// <summary>
 		/// Writes a message to the console with green text.
 		/// </summary>
-		/// <param name="text"></param>
+		/// <param name="text">The text to write.</param>
 		public static void WriteSuccess(string text)
 		{
 			RequestWriteLine(text, ConsoleColor.Green);
@@ -47,7 +61,7 @@
 		/// <summary>
 		/// Writes a message to the console with white text.
 		/// </summary>
-		/// <param name="text"></param>
+		/// <param name="text">The text to write.</param>
 		public static void WriteInfo(string text)
 		{
 			RequestWriteLine(text, ConsoleColor.Gray);
@@ -55,12 +69,28 @@
 		/// <summary>
 		/// Writes a message to the console with yellow text.
 		/// </summary>
-		/// <param name="text"></param>
+		/// <param name="text">The text to write.</param>
 		public static void WriteWarning(string text)
 		{
 			RequestWriteLine(text, ConsoleColor.Yellow);
 		}
 		
+		/// <summary>
+		/// Writes a debug message to the console with gray text if ShowDebugOutput is true.
+		/// </summary>
+		/// <param name="text">The text to write.</param>
+		public static void WriteDebug(string text)
+		{
+			if (ShowDebugOutput)
+				RequestWriteLine("DEBUG: " + text, ConsoleColor.Gray);
+
+		}
+		
+		/// <summary>
+		/// Asks the user a yes/no question and returns true for yes and false for no.
+		/// </summary>
+		/// <param name="question">The question to ask.</param>
+		/// <returns>A task that represents the asynchronous operation. The result of the task is true if the user answered yes, false otherwise.</returns>
 		public static async Task<bool> AskYesNo(string question)
 		{
 			yesNoQuestionActive = true;
@@ -118,13 +148,6 @@
 			if (!string.IsNullOrEmpty(current))
 				parts.Add(current);
 			return parts.ToArray();
-		}
-		
-		public static void WriteDebug(string text)
-		{
-			if (ShowDebugOutput)
-				RequestWriteLine("DEBUG: " + text, ConsoleColor.Gray);
-
 		}
 	}
 }

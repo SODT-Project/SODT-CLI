@@ -16,6 +16,7 @@ namespace SODT_CLI
 		
 		public string Description { get; }
 	}
+	
 	/// <summary>
 	/// Command to connect to a server.
 	/// </summary>
@@ -66,6 +67,7 @@ namespace SODT_CLI
 			return (args[0], port);
 		}
 	}
+	
 	/// <summary>
 	/// Command to connect to the default server, specified in a config file.
 	/// </summary>
@@ -85,6 +87,7 @@ namespace SODT_CLI
 			base.Execute(client, server[0], server[1]);
 		}
 	}
+	
 	/// <summary>
 	/// Command to list all connected clients.
 	/// </summary>
@@ -110,6 +113,10 @@ namespace SODT_CLI
 			SmartConsole.WriteInfo($"Connected clients: {clients}");
 		}
 	}
+	
+	/// <summary>
+	/// Command to set the auto accept mode for file transfers.
+	/// </summary>
 	internal class AutoAcceptFileTransferCommand : ICommand
 	{
 		public string Description => "Sets the auto accept mode for file transfers. Usage: auto-accept-files <true/false>.";
@@ -123,6 +130,10 @@ namespace SODT_CLI
 		}
 		
 	}
+	
+	/// <summary>
+	/// Command to set the auto accept mode for key exchanges.
+	/// </summary>
 	internal class AutoAcceptKeyExchangeCommand : ICommand
 	{
 		public string Description => "Sets the auto accept mode for key exchanges. Usage: auto-accept-keys <true/false>.";
@@ -136,6 +147,10 @@ namespace SODT_CLI
 		}
 		
 	}
+	
+	/// <summary>
+	/// Command to set the auto accept mode for both file transfers and key exchanges.
+	/// </summary>
 	internal class AutoAcceptAllCommand : ICommand
 	{
 		public string Description => "Sets the auto accept mode for file transfers and key exchanges. Usage: auto-accept-all <true/false>.";
@@ -169,6 +184,7 @@ namespace SODT_CLI
 			client.DisconnectFromServer().Wait();
 		}
 	}
+	
 	/// <summary>
 	/// Command to exchange a aes session key with a specified client.
 	/// </summary>
@@ -247,6 +263,7 @@ namespace SODT_CLI
 		}
 
 	}
+	
 	/// <summary>
 	/// Command to set the debug output.
 	/// </summary>
@@ -261,6 +278,7 @@ namespace SODT_CLI
 			SmartConsole.ShowDebugOutput = show;
 		}
 	}
+	
 	/// <summary>
 	/// Base class for commands that list the progress of file transfer tasks.
 	/// </summary>
@@ -337,6 +355,7 @@ namespace SODT_CLI
 		/// <returns>The amount of lines that were written to the console.</returns>
 		protected abstract int ShowProgressContent(SodtClient client);
 	}
+	
 	/// <summary>
 	/// Command to list the progress of send file tasks.
 	/// </summary>
@@ -360,6 +379,7 @@ namespace SODT_CLI
 			return linesWritten;
 		}
 	}
+	
 	/// <summary>
 	/// Command to list the progress of receive file tasks.
 	/// </summary>
@@ -383,6 +403,7 @@ namespace SODT_CLI
 			return linesWritten;
 		}
 	}
+	
 	/// <summary>
 	/// Command to set the default server.
 	/// </summary>
@@ -410,6 +431,7 @@ namespace SODT_CLI
 			};
 		}
 	}
+	
 	/// <summary>
 	/// Command to set the default server public key.
 	/// This command needs one argument: <see cref="string"/> path to the public key file.
@@ -460,6 +482,7 @@ namespace SODT_CLI
 			return keyPem;
 		}
 	}
+	
 	/// <summary>
 	/// Command to clear the console.
 	/// This command has no arguments.
@@ -478,6 +501,10 @@ namespace SODT_CLI
 			Console.Clear();
 		}
 	}
+	
+	/// <summary>
+	/// Command to list all command aliases.
+	/// </summary>
 	internal class ListAliasesCommand : ICommand
 	{
 		private readonly Dictionary<string, string> aliases;
@@ -496,6 +523,7 @@ namespace SODT_CLI
 			}
 		}
 	}
+	
 	/// <summary>
 	/// Command to display the help message.
 	/// </summary>
