@@ -16,7 +16,7 @@ The client uses ECDH to establish a session key. Messages and file data are then
 - ECDH key exchange for secure client sessions
 - AES-GCM encryption for messages and file transfers
 - Send files to other connected clients
-- Receive files in the local Downloads folder
+- Receive files in the users Downloads folder
 - View live send and receive progress
 - Optional automatic acceptance of key exchanges and file transfers
 - Short aliases for frequently used commands
@@ -30,20 +30,21 @@ The client uses ECDH to establish a session key. Messages and file data are then
 - The server's ECDSA public key in PEM format
 
 ### Run the client
+- Download the Client CLI for your preferred OS under [Releases](https://github.com/SODT-Project/SODT-CLI/releases).
+- Unpack the folder and run:
 
-From the project directory, run:
-
+On Linux:
 ```bash
-TODO
+./SODT-CLI
 ```
-
-Before connecting, configure the server's public key:
-
-```text
-set-default-key path/to/server-public-key.pem
+On Windows:
+```bash
+SODT-CLI.exe
 ```
-
-The key is saved as `defaultServer.key` in the current directory. The client requires this key when connecting.
+As Portable:
+```bash
+dotnet SODT-CLI.dll
+```
 
 ### Main commands
 
@@ -59,8 +60,18 @@ disconnect                  Disconnect from the server
 help                        Show all available commands
 ```
 
-To configure the default server, use `set-default-server <host> <port>`. Use `list-aliases` to see the available shortcuts, such as `c` for `connect-default` and `s` for `send`.
+Before connecting, configure the server's public key:
 
-Incoming files are saved in the user's Downloads folder. File transfers and key exchanges can be accepted automatically with `auto-accept-files`, `auto-accept-keys`, or `auto-accept-all`.
+```text
+set-default-key path/to/server-public-key.pem
+```
+or 
+```text
+set-default-key https://myserver.tld/sodt/public-key.pem
+```
+- The key is saved as `defaultServer.key` in the current directory. The client requires this key when connecting.
+- To configure the default server, use `set-default-server <host> <port>`. Use `list-aliases` to see the available shortcuts, such as `c` for `connect-default` and `s` for `send`.
+- Incoming files are saved in the user's Downloads folder.
+- File transfers and key exchanges can be accepted automatically with `auto-accept-files`, `auto-accept-keys`, or `auto-accept-all`.
 
 
