@@ -13,7 +13,7 @@ namespace SODT_CLI.Tests
 	{
 		private const string ServerIp = "127.0.0.1";
 		private const int ServerPort = 45645;
-		private const string ServerCertificatePath = "/home/ehrke/source/sodt-project/SODT-Server/SODT-Server/bin/Debug/net10.0/certs/public/ecdsa_cert.pem";
+		private const string ServerCertificatePath = "ecdsa_cert.pem";
 		private const int CommunicationTimeoutMilliseconds = 10000;
 
 		[Fact]
