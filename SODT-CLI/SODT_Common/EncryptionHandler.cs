@@ -1,7 +1,6 @@
 using System.Security.Cryptography;
-using SODT_CLI;
 
-namespace SODT_Common
+namespace SODT_CLI.SODT_Common
 {
 	public static class EncryptionHandler
 	{

@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace SODT_CLI
+﻿namespace SODT_CLI
 {
 	internal static class SmartConsole
 	{
