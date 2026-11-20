@@ -31,7 +31,7 @@ The client uses ECDH to establish a session key. Messages and file data are then
 
 ### Run the client
 - Download the Client CLI for your preferred OS under [Releases](https://github.com/SODT-Project/SODT-CLI/releases).
-- Unpack the folder and run:
+- Unpack the folder, open a terminal in it and run:
 
 On Linux:
 ```bash
@@ -39,7 +39,7 @@ On Linux:
 ```
 On Windows:
 ```bash
-SODT-CLI.exe
+.\SODT-CLI.exe
 ```
 As Portable:
 ```bash
